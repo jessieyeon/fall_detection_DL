@@ -69,6 +69,17 @@ frr.encode_faces()
 pose_video = mp.solutions.pose.Pose(static_image_mode=False, min_detection_confidence=0.7, model_complexity=1)
 video = cv2.VideoCapture(video_source)
 
+# Processing a video file (esp. with face_recognition) is slower than the video's own frame rate, so
+# wall-clock time between reads no longer matches the time between frames in the footage. For a file,
+# advance a virtual clock using the file's own fps instead; for a live webcam, wall-clock time is correct
+# since frames really do arrive in real time.
+is_video_file = isinstance(video_source, str)
+if is_video_file:
+    source_fps = video.get(cv2.CAP_PROP_FPS)
+    if not source_fps or source_fps <= 0:
+        source_fps = 30.0
+    video_clock = 0.0
+
 velocity_history = deque(maxlen=SMOOTHING_WINDOW)
 previous_center_y = None
 previous_time = None
@@ -88,7 +99,11 @@ while video.isOpened():
         current_face_name = face_name
         print("Detected face:", face_name)
 
-    now = time()
+    if is_video_file:
+        video_clock += 1.0 / source_fps
+        now = video_clock
+    else:
+        now = time()
     smoothed_velocity = 0.0
 
     if landmarks is not None:
