@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 fall_risk_log.csv
+test_videos/*
+!test_videos/.gitkeep

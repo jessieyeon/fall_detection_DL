@@ -2,16 +2,27 @@
 This project is aimed at developing a fall detection system using OpenCV and MediaPipe libraries in Python. The system detects falls by monitoring the movements of individuals captured in live video feeds and triggers an alert when a fall is detected. The implementation involves capturing the video using OpenCV, marking landmarks using MediaPipe, and analyzing the movements to identify falls.
 
 ## Requirements
-To run this project, you need to have the following libraries installed:
+On macOS, `face_recognition` builds `dlib` from source, so install `cmake` first:
 
-OpenCV (import cv2)
-MediaPipe (import mediapipe as mp)
-Python (from time import time)
-You can install the required libraries using pip:
+```
+brew install cmake
+```
 
-Copy code
-` pip install opencv-python
-pip install mediapipe ` 
+Then install the pinned Python dependencies:
+
+```
+pip install -r requirements.txt
+```
+
+`mediapipe` is pinned to `0.10.14` because newer releases removed the legacy
+`mp.solutions.pose` API this project depends on.
+
+## Usage
+
+```
+python main.py               # live webcam
+python main.py path/to/video.mp4   # recorded video (for testing without a webcam)
+```
 
 ### Working of the Prototype
 [Working Demo with Fall Detection and Face Recognition](https://drive.google.com/file/d/1HhNCq11J1ZNmuDoxo6KYVFS1S7IJZid7/view?usp=sharing)
