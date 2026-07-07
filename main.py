@@ -1,15 +1,21 @@
 import facial_recognition as fr
 
+import sys
 import os
+import csv
 import cv2
-import numpy as np
-import math
 import mediapipe as mp
 from time import time
+from datetime import datetime
+from collections import deque
 
-previous_avg_shoulder_height = 0
+VELOCITY_THRESHOLD = 1.2   # torso drop speed (frame-heights/sec) that counts as a fall risk - tune by testing
+SMOOTHING_WINDOW = 3       # frames averaged to reduce landmark jitter
+RISK_COOLDOWN = 3.0        # seconds to wait before raising another risk signal for the same fall
+LOG_FILE = "fall_risk_log.csv"
 
-def detectPose(frame, pose_model, display=True):
+
+def detectPose(frame, pose_model):
     modified_frame = frame.copy()
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = pose_model.process(frame_rgb)
@@ -26,62 +32,94 @@ def detectPose(frame, pose_model, display=True):
             cv2.line(modified_frame, (landmarks[start_point][0], landmarks[start_point][1]),
                      (landmarks[end_point][0], landmarks[end_point][1]), (0, 255, 0), 3)
     else:
-        return None, None  
-    if display:
-        cv2.imshow('Pose Landmarks', modified_frame)
+        return modified_frame, None
     return modified_frame, landmarks
 
-def detectFall(landmarks, height, previous_avg_shoulder_height):
 
+def torsoCenterY(landmarks):
+    # average of shoulders + hips approximates center of mass better than shoulders alone
     left_shoulder_y = landmarks[11][1]
     right_shoulder_y = landmarks[12][1]
-    
-    # Calculate the average y-coordinate of the shoulder
-    avg_shoulder_y = (left_shoulder_y + right_shoulder_y) / 2
+    left_hip_y = landmarks[23][1]
+    right_hip_y = landmarks[24][1]
+    return (left_shoulder_y + right_shoulder_y + left_hip_y + right_hip_y) / 4
 
-    if(previous_avg_shoulder_height==0):
-        previous_avg_shoulder_height=avg_shoulder_y
-        return False,previous_avg_shoulder_height
-    fall_threshold = previous_avg_shoulder_height * 1.5
-    print(previous_avg_shoulder_height, avg_shoulder_y,end="\n")
-    
-    # Check if the average shoulder y-coordinate falls less than the previous average shoulder height
-    if avg_shoulder_y > fall_threshold:
-        previous_avg_shoulder_height = avg_shoulder_y
-        return True, previous_avg_shoulder_height
-    else:
-        previous_avg_shoulder_height = avg_shoulder_y
-        return False, previous_avg_shoulder_height
 
+def send_fall_risk_signal(name):
+    # TODO: wire this up to the actual impact-mitigation tile (HTTP request / MQTT / serial, etc.)
+    print(f"[FALL RISK] Rapid collapse motion detected (person: {name}) -> tile signal sent")
+
+
+def log_fall_risk_event(name, velocity):
+    file_exists = os.path.isfile(LOG_FILE)
+    with open(LOG_FILE, "a", newline="") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["timestamp", "person", "velocity"])
+        writer.writerow([datetime.now().isoformat(timespec="seconds"), name, f"{velocity:.3f}"])
+
+
+# usage: python main.py [video_path]   (defaults to webcam 0 if no path is given)
+video_source = 0
+if len(sys.argv) > 1:
+    video_source = int(sys.argv[1]) if sys.argv[1].isdigit() else sys.argv[1]
 
 frr = fr.FaceRecognition()
 frr.encode_faces()
-pose_video = mp.solutions.pose.Pose(static_image_mode=False, min_detection_confidence=0.7, model_complexity=2)
-video = cv2.VideoCapture(0)
-time1 = 0
-fall_detected = False
-    
+pose_video = mp.solutions.pose.Pose(static_image_mode=False, min_detection_confidence=0.7, model_complexity=1)
+video = cv2.VideoCapture(video_source)
+
+velocity_history = deque(maxlen=SMOOTHING_WINDOW)
+previous_center_y = None
+previous_time = None
+last_risk_time = 0
+current_face_name = "unknown"
+
 while video.isOpened():
     ret, frame = video.read()
     if not ret:
         break
-    
-    modified_frame, landmarks = detectPose(frame, pose_video, display=True)
-    face_names = frr.recognize_face(frame)
-    if face_names is not None:
-        print("Detected faces:", face_names)
-        
-    time2 = time()
-    
-    if (time2 - time1) > 2: 
-        # print("time")
-        if landmarks is not None:
-            # print("landmarks")
-            height, _, _ = frame.shape
-            fall_detected, previous_avg_shoulder_height = detectFall(landmarks, height, previous_avg_shoulder_height)
-            if fall_detected:                 
-                print("Fall detected!")          
-        time1 = time2
+
+    height, _, _ = frame.shape
+    modified_frame, landmarks = detectPose(frame, pose_video)
+
+    face_name = frr.recognize_face(frame)
+    if face_name is not None:
+        current_face_name = face_name
+        print("Detected face:", face_name)
+
+    now = time()
+    smoothed_velocity = 0.0
+
+    if landmarks is not None:
+        center_y = torsoCenterY(landmarks)
+
+        if previous_center_y is not None:
+            dt = now - previous_time
+            if dt > 0:
+                # normalize by frame height so the threshold doesn't depend on resolution/camera distance
+                velocity = ((center_y - previous_center_y) / height) / dt
+                velocity_history.append(velocity)
+                smoothed_velocity = sum(velocity_history) / len(velocity_history)
+
+                if smoothed_velocity > VELOCITY_THRESHOLD and (now - last_risk_time) > RISK_COOLDOWN:
+                    print(f"Fall risk! torso dropping at {smoothed_velocity:.2f} frame-heights/sec")
+                    send_fall_risk_signal(current_face_name)
+                    log_fall_risk_event(current_face_name, smoothed_velocity)
+                    last_risk_time = now
+
+        previous_center_y = center_y
+        previous_time = now
+    else:
+        # lost tracking - drop stale velocity history so old motion doesn't linger
+        velocity_history.clear()
+        previous_center_y = None
+        previous_time = None
+
+    cv2.putText(modified_frame, f"velocity: {smoothed_velocity:.2f}", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+    cv2.imshow('Pose Landmarks', modified_frame)
+
     k = cv2.waitKey(1) & 0xFF
     if k == 27:
         break
