@@ -69,11 +69,12 @@ frr.encode_faces()
 pose_video = mp.solutions.pose.Pose(static_image_mode=False, min_detection_confidence=0.7, model_complexity=1)
 video = cv2.VideoCapture(video_source)
 
-# Processing a video file (esp. with face_recognition) is slower than the video's own frame rate, so
-# wall-clock time between reads no longer matches the time between frames in the footage. For a file,
-# advance a virtual clock using the file's own fps instead; for a live webcam, wall-clock time is correct
-# since frames really do arrive in real time.
-is_video_file = isinstance(video_source, str)
+# Processing a recorded video file (esp. with face_recognition) is slower than the file's own frame rate,
+# so wall-clock time between reads no longer matches the time between frames in the footage. For a local
+# file, advance a virtual clock using the file's own fps instead. A live source - a webcam index or a
+# network camera stream URL (e.g. a phone IP-camera app) - delivers frames in real time either way, so
+# wall-clock time is correct there.
+is_video_file = isinstance(video_source, str) and os.path.isfile(video_source)
 if is_video_file:
     source_fps = video.get(cv2.CAP_PROP_FPS)
     if not source_fps or source_fps <= 0:
