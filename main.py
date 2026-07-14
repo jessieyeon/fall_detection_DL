@@ -24,10 +24,12 @@ FALLBACK_PROB_THRESHOLD = 0.7  # overridden by the threshold saved inside the mo
 
 SMOOTHING_WINDOW = 3        # frames averaged to reduce landmark jitter
 RISK_COOLDOWN = 3.0         # seconds to wait before raising another risk signal for the same fall
+RESET_DELAY = 2.0           # seconds after firing before sending the "return to home" signal
+                             # (the Adafruit-PWM Arduino sketch doesn't auto-reset like the old one did)
 LOG_FILE = "fall_risk_log.csv"
 CALIBRATION_FILE = "calibration.json"  # created by calibrate.py
 
-SERIAL_PORT = None  # e.g. '/dev/tty.usbmodemXXXX' (macOS) or 'COM3' (Windows) - set once the Arduino is wired up
+SERIAL_PORT = "/dev/cu.usbmodem9888E00A2B282"  # macOS Arduino Uno R4 WiFi port
 SERIAL_BAUDRATE = 9600
 
 L_SHOULDER, R_SHOULDER = 11, 12
@@ -164,11 +166,25 @@ def connect_arduino():
 
 
 def send_fall_risk_signal(name, tile_index, arduino):
+    # main.py numbers tiles 0..3, but the Arduino sketch (Adafruit PCA9685 driver) numbers
+    # motors 1..4 and reads a single character (not a newline-terminated integer), so tile 0
+    # -> "1", tile 1 -> "2", etc.
+    motor_id = tile_index + 1
     if arduino is not None:
-        arduino.write(f"{tile_index}\n".encode())
-        print(f"[FALL RISK] tile={tile_index} person={name} -> sent to Arduino")
+        arduino.write(str(motor_id).encode())
+        print(f"[FALL RISK] tile={tile_index} (motor {motor_id}) person={name} -> sent to Arduino")
     else:
-        print(f"[FALL RISK] tile={tile_index} person={name} -> tile signal sent (simulated, no Arduino connected)")
+        print(f"[FALL RISK] tile={tile_index} (motor {motor_id}) person={name} -> "
+              "signal sent (simulated, no Arduino connected)")
+
+
+def send_reset_signal(arduino):
+    # tells the Arduino sketch to return every "fired" motor back to HOME_ANGLE
+    if arduino is not None:
+        arduino.write(b"0")
+        print("[RESET] sent to Arduino")
+    else:
+        print("[RESET] signal sent (simulated, no Arduino connected)")
 
 
 def log_fall_risk_event(name, tile_index, score):
@@ -215,6 +231,7 @@ prev_tilt = None
 prev_time = None
 consecutive_risk_frames = 0
 last_risk_time = 0
+reset_pending = False
 current_face_name = "unknown"
 
 while video.isOpened():
@@ -283,6 +300,7 @@ while video.isOpened():
             log_fall_risk_event(current_face_name, current_tile, risk_score)
             last_risk_time = now
             consecutive_risk_frames = 0
+            reset_pending = True
 
         prev_center = center
         prev_tilt = tilt
@@ -296,6 +314,10 @@ while video.isOpened():
         prev_tilt = None
         prev_time = None
         consecutive_risk_frames = 0
+
+    if reset_pending and (now - last_risk_time) > RESET_DELAY:
+        send_reset_signal(arduino)
+        reset_pending = False
 
     if tile_grid is not None:
         drawTileGrid(modified_frame, tile_grid, current_row, current_col)
