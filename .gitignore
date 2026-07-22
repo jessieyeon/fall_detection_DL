@@ -5,3 +5,4 @@ calibration.json
 test_videos/*
 !test_videos/.gitkeep
 .superpowers/
+fall_risk_log.old.csv
