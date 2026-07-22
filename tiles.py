@@ -50,3 +50,30 @@ def lean_from_landmarks(landmarks, camera_yaw_deg=0.0):
     lean_ratio = math.hypot(dx, dz) / torso_length
     direction_deg = (math.degrees(math.atan2(dx, dz)) - camera_yaw_deg) % 360.0
     return direction_deg, lean_ratio
+
+
+def resolve_direction(window):
+    """최근 N프레임의 표본에서 대표 방향과 방향 일치도를 구한다.
+
+    window: (direction_deg, lean_ratio) 튜플의 시퀀스.
+
+    반환값 (mean_direction_deg, R, mean_lean_ratio):
+      R 은 원형통계의 평균 결과 길이다. 표본들이 같은 방향을 가리키면 1에 가깝고
+      흩어지면 0에 가깝다. 이 값을 방향 확신도로 사용한다.
+    """
+    if not window:
+        return 0.0, 0.0, 0.0
+
+    sin_sum = sum(math.sin(math.radians(d)) for d, _ in window)
+    cos_sum = sum(math.cos(math.radians(d)) for d, _ in window)
+    n = len(window)
+
+    mean_direction_deg = math.degrees(math.atan2(sin_sum, cos_sum))
+    if mean_direction_deg < 0:
+        mean_direction_deg += 360.0
+    # 부동소수점 반올림으로 인한 360 처리
+    if mean_direction_deg >= 360.0:
+        mean_direction_deg = 0.0
+    R = math.hypot(sin_sum, cos_sum) / n
+    mean_lean_ratio = sum(lean for _, lean in window) / n
+    return mean_direction_deg, R, mean_lean_ratio

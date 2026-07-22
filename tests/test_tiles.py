@@ -69,3 +69,39 @@ def test_degenerate_zero_length_torso_does_not_divide_by_zero():
     direction, lean_ratio = tiles.lean_from_landmarks(lm)
     assert direction == 0.0
     assert lean_ratio == 0.0
+
+
+def test_circular_mean_wraps_around_zero():
+    # 산술평균이면 180도가 나온다. 이 함수가 존재하는 이유가 정확히 이것이다.
+    mean_direction, _, _ = tiles.resolve_direction([(350.0, 0.5), (10.0, 0.5)])
+    assert mean_direction == pytest.approx(0.0, abs=1e-6)
+
+
+def test_identical_directions_give_R_of_one():
+    window = [(90.0, 0.4)] * 5
+    mean_direction, R, mean_lean = tiles.resolve_direction(window)
+    assert mean_direction == pytest.approx(90.0)
+    assert R == pytest.approx(1.0)
+    assert mean_lean == pytest.approx(0.4)
+
+
+def test_opposite_directions_give_R_of_zero():
+    _, R, _ = tiles.resolve_direction([(0.0, 0.5), (180.0, 0.5)])
+    assert R == pytest.approx(0.0, abs=1e-9)
+
+
+def test_scattered_directions_lower_R():
+    tight = [(90.0, 0.5), (92.0, 0.5), (88.0, 0.5)]
+    loose = [(90.0, 0.5), (150.0, 0.5), (30.0, 0.5)]
+    _, tight_R, _ = tiles.resolve_direction(tight)
+    _, loose_R, _ = tiles.resolve_direction(loose)
+    assert tight_R > loose_R
+
+
+def test_mean_lean_ratio_is_the_arithmetic_mean():
+    _, _, mean_lean = tiles.resolve_direction([(90.0, 0.2), (90.0, 0.6)])
+    assert mean_lean == pytest.approx(0.4)
+
+
+def test_empty_window_returns_zeros():
+    assert tiles.resolve_direction([]) == (0.0, 0.0, 0.0)
