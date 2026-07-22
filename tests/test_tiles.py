@@ -50,6 +50,21 @@ def test_leaning_toward_camera_is_180_degrees():
     assert direction == pytest.approx(180.0)
 
 
+def test_diagonal_landmarks_give_45_degrees():
+    # dx, dz 둘 다 0이 아닌 진짜 대각 사례 - 1장/3장 선택의 헤드라인 기능이
+    # 실제로 어깨/엉덩이 랜드마크에서 끝까지 나오는지 확인한다
+    lm = make_landmarks(shoulder=(200.0, 100.0, 100.0), hip=(100.0, 200.0, 0.0))
+    direction, _ = tiles.lean_from_landmarks(lm)
+    assert direction == pytest.approx(45.0)
+
+
+def test_diagonal_landmarks_give_225_degrees_in_mirrored_quadrant():
+    # 반대쪽 사분면(좌 + 카메라 쪽)도 동일하게 확인한다
+    lm = make_landmarks(shoulder=(0.0, 100.0, -100.0), hip=(100.0, 200.0, 0.0))
+    direction, _ = tiles.lean_from_landmarks(lm)
+    assert direction == pytest.approx(225.0)
+
+
 def test_camera_yaw_rotates_the_direction():
     # 카메라가 격자 대비 90도 돌아가 있으면 "이미지상 우측"이 격자상 0도가 된다
     lm = make_landmarks(shoulder=(200.0, 100.0, 0.0), hip=(100.0, 200.0, 0.0))

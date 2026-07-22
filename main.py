@@ -87,6 +87,7 @@ def main():
         print(f"오류: {exc}")
         return 1
     print(f"프로파일 '{profile.name}' - persistence={profile.persistence}, "
+          f"prob_threshold={profile.prob_threshold}, "
           f"tau_R={profile.tau_R}, tau_R_strict={profile.tau_R_strict}, "
           f"tau_lean={profile.tau_lean}, window={profile.window}")
 
@@ -109,14 +110,19 @@ def main():
     prob_threshold = profile.prob_threshold
     persistence = profile.persistence
 
-    source = pose_source.PoseSource(
-        video_source=video_source,
-        model_bundle=model_bundle,
-        prob_threshold=prob_threshold,
-        tile_grid=tile_grid,
-        face_every=args.face_every,
-        face_recognizer=build_face_recognizer(args.face_every),
-    )
+    try:
+        source = pose_source.PoseSource(
+            video_source=video_source,
+            model_bundle=model_bundle,
+            prob_threshold=prob_threshold,
+            tile_grid=tile_grid,
+            face_every=args.face_every,
+            face_recognizer=build_face_recognizer(args.face_every),
+        )
+    except ValueError as exc:
+        print(f"오류: {exc}")
+        controller.close()
+        return 1
 
     window = deque(maxlen=profile.window)
     consecutive_risk_frames = 0
@@ -176,19 +182,26 @@ def main():
             if controller.simulated and not args.no_serial:
                 cv2.putText(image, "NO ARDUINO (simulated)", (10, 90),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            if reset_pending:
+                # calibration.json 이 없어 격자 오버레이가 안 그려지는 경우에도
+                # 발사되었다는 사실 자체는 화면에 남아야 한다 - (n/persistence)
+                # 카운터는 발사와 동시에 0으로 리셋되어 아무 단서를 안 남긴다
+                cv2.putText(image, f"FIRED {sorted(active_tiles)}", (10, 120),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
             cv2.imshow("Fall Detection", image)
             if (cv2.waitKey(1) & 0xFF) == 27:
                 break
     except KeyboardInterrupt:
         print("종료...")
-
-    # 미송된 reset 신호 처리
-    if reset_pending and not args.no_serial:
-        controller.reset()
-    source.release()
-    cv2.destroyAllWindows()
-    controller.close()
+    finally:
+        # 미송된 reset 신호 처리 - 루프 중 어떤 예외로 빠져나가더라도
+        # 서보가 올라간 채로, 시리얼 포트가 잡힌 채로 프로세스가 죽으면 안 된다
+        if reset_pending and not args.no_serial:
+            controller.reset()
+        source.release()
+        cv2.destroyAllWindows()
+        controller.close()
     return 0
 
 

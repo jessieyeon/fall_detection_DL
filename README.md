@@ -52,9 +52,16 @@ python main.py --face-every 10                  # 10프레임마다 얼굴 인�
 
 ### Per-tile targeting (which impact-mitigation tile fires)
 
-Tiles are laid out in a grid on the floor. `main.py` maps the detected person's foot
-position to a grid cell (row/col) and only signals the tile at that cell, numbered
-`0..rows*cols-1` in row-major order (row 0 left-to-right, then row 1, ...).
+Tiles are laid out in a grid on the floor, numbered `0..rows*cols-1` in row-major
+order (row 0 left-to-right, then row 1, ...). `main.py` does **not** use the
+detected person's foot position to pick a tile — ankle landmarks are unreliable
+in this setup (easily occluded, poorly tracked on the doll), so the design
+deliberately avoids them. Instead the fall's *direction* (torso lean, from
+shoulder and hip landmarks) and its agreement across the recent frame window
+decide the tiles: a clear cardinal direction fires a whole row/column (2 tiles),
+a clear diagonal fires 3 tiles (everything but the far corner), a very confident
+diagonal fires a single corner tile, and a low-confidence or mostly-vertical
+reading fires every tile (1 to 4 tiles total, see `tiles.select_tiles`).
 
 Run the calibration tool once per camera setup (whenever the camera or tile grid moves):
 
@@ -66,7 +73,8 @@ python calibrate.py <rows> <cols> [video_source]
 Click the 4 corners of the tile-covered floor area in the video frame, in order:
 top-left, top-right, bottom-right, bottom-left. This writes `calibration.json`
 (gitignored, since it's specific to one physical camera/tile setup). If it's
-missing, `main.py` still runs but always targets tile 0.
+missing, `main.py` still runs, falls back to a 2x2 grid, and simply skips
+drawing the grid overlay on screen.
 
 `calibration.json` 에는 `camera_yaw_deg` 항목이 함께 저장됩니다. 카메라가 타일
 격자를 정면에서 보고 있으면 `0` 그대로 두고, 격자가 화면상 회전해 보이면 그

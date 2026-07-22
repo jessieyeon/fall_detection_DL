@@ -122,6 +122,14 @@ class TileController:
             print(f"[모의] {command}")
             return False
 
+        # 이전 명령의 응답이 타임아웃 이후에 도착해 버퍼에 남아있을 수 있다.
+        # 그 상태로 쓰기만 하면 이번 읽기가 그 묵은 줄을 집어서 영원히 한 응답씩
+        # 밀리게 되므로, 쓰기 전에 반드시 비운다.
+        try:
+            self._serial.reset_input_buffer()
+        except Exception:
+            pass
+
         try:
             self._serial.write((command + "\n").encode("ascii"))
         except Exception as exc:
@@ -136,8 +144,16 @@ class TileController:
                 continue
             if line == expected:
                 return True
+            if line.startswith("ERR"):
+                # 명시적 오류 응답이다 - 더 기다려봐야 늦게 온 다른 응답만 섞일
+                # 뿐이므로 타임아웃까지 기다리지 않고 바로 실패로 끝낸다.
+                print(f"[타일] 경고: '{command}' 에 오류 응답 ({line!r})")
+                return False
+            # 예상과 다른 줄(예: 이전 명령의 지연된 응답)이다. 여기서 바로
+            # 실패로 끝내면 이 잘못 도착한 줄 하나가 다음 명령들의 응답까지
+            # 전부 한 칸씩 밀어버린다 - 마감 시간까지 계속 읽어서 진짜 응답을
+            # 기다린다.
             print(f"[타일] 경고: 예상과 다른 응답 {line!r} (기대: {expected!r})")
-            return False
 
         print(f"[타일] 경고: '{command}' 응답 시간 초과")
         return False
