@@ -41,7 +41,10 @@ def load_profile(name, path=PROFILE_FILE):
         raise ValueError(f"프로파일 파일을 찾을 수 없습니다: {path}")
 
     with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"프로파일 파일의 JSON 형식이 잘못되었습니다: {path} ({e.msg})")
 
     if name not in data:
         available = ", ".join(sorted(data)) or "(없음)"

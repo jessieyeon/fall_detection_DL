@@ -66,3 +66,11 @@ def test_shipped_profiles_json_is_valid():
         assert 0.0 <= profile.tau_R <= profile.tau_R_strict <= 1.0
         assert profile.persistence >= 1
         assert profile.window >= 1
+
+
+def test_malformed_json_raises(tmp_path):
+    # 잘못된 JSON 파일에서 파일 경로를 포함한 ValueError 를 발생시킨다.
+    path = tmp_path / "profiles.json"
+    path.write_text("{invalid json", encoding="utf-8")
+    with pytest.raises(ValueError, match=str(path)):
+        config.load_profile("human", str(path))
