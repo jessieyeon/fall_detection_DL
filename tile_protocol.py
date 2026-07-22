@@ -47,11 +47,11 @@ class TileController:
         delay(500) 이 있다. 핸드셰이크 없이 바로 명령을 보내면 부팅 중에
         삼켜진다.
         """
+        self._close_serial()  # 재연결 시 이전 핸들이 열린 채로 새지 않도록 먼저 닫는다
+
         if not port:
             print("[타일] 시리얼 포트가 지정되지 않음 - 시뮬레이션 모드로 실행합니다.")
             return self._fall_back_to_simulation()
-
-        self._close_serial()  # 재연결 시 이전 핸들이 열린 채로 새지 않도록 먼저 닫는다
 
         try:
             self._serial = self._factory(port, baud, SERIAL_READ_TIMEOUT)

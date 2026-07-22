@@ -163,3 +163,20 @@ def test_reconnect_closes_previous_serial_handle():
     assert first_fake.closed is True
     assert first_fake.close_count == 1
     assert second_fake.closed is False
+
+
+def test_connect_to_simulation_closes_previous_serial_handle():
+    # 실제 포트로 연결한 후 None 으로 연결하면 첫 번째 핸들이 닫혀야 한다.
+    fake = FakeSerial(["READY 4"])
+
+    def factory(port, baud, read_timeout):
+        return fake
+
+    controller = tile_protocol.TileController(serial_factory=factory)
+    assert controller.connect("/dev/fake") == 4
+    assert fake.closed is False
+
+    assert controller.connect(None) == 0
+    assert controller.simulated is True
+    assert fake.closed is True
+    assert fake.close_count == 1
