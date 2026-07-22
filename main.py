@@ -138,9 +138,15 @@ def main():
                 # 추적 상실 - 오래된 방향이 다음 낙상 판정에 섞이면 안 된다
                 window.clear()
                 consecutive_risk_frames = 0
-            else:
+            elif frame.is_risky:
+                # 위험 프레임만 큐에 넣는다 - 서 있을 때의 방향 잡음이 섞이면 안 된다
                 window.append((frame.direction_deg, frame.lean_ratio))
-                consecutive_risk_frames = consecutive_risk_frames + 1 if frame.is_risky else 0
+                consecutive_risk_frames += 1
+            else:
+                # 위험 연속이 끊김 - persistence를 못 채운 이전 구간의 표본이
+                # 다음 낙상의 방향 판정에 섞이면 안 된다
+                window.clear()
+                consecutive_risk_frames = 0
 
             if (consecutive_risk_frames >= persistence
                     and (now - last_risk_time) > RISK_COOLDOWN):
