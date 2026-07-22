@@ -20,9 +20,35 @@ pip install -r requirements.txt
 ## Usage
 
 ```
-python main.py               # live webcam
-python main.py path/to/video.mp4   # recorded video (for testing without a webcam)
+python main.py                                  # 웹캠
+python main.py test_videos/S01T13R01_.mp4       # 녹화 영상
+python main.py --port /dev/cu.usbmodemXXXX      # 아두이노 연결
+python main.py --profile doll                   # 인형 프로파일
+python main.py --no-serial                      # 임계값 튜닝용 (서보 안 움직임)
+python main.py --face-every 10                  # 10프레임마다 얼굴 인식
 ```
+
+얼굴 인식은 기본으로 꺼져 있습니다(`--face-every 0`). `face_recognition` 은 무거워서
+프레임레이트를 크게 떨어뜨리고, 프레임레이트가 떨어지면 빠르게 쓰러지는 대상에서
+`persistence` 프레임 수를 채우지 못합니다.
+
+### 판정 프로파일
+
+낙상 판정 파라미터는 `profiles.json` 에 있습니다. 코드 상수로 두지 않는 이유는
+리허설 중에 코드를 고치면 시연 당일 잘못된 값이 남기 때문입니다.
+
+| 항목 | 뜻 |
+|---|---|
+| `persistence` | 발사하기까지 필요한 연속 위험 프레임 수 |
+| `prob_threshold` | 낙상 위험으로 볼 모델 확률 |
+| `window` | 방향 평균을 낼 프레임 수 |
+| `tau_R` | 이 값 미만이면 방향 판정 불가 → 전체 타일 |
+| `tau_R_strict` | 이 값 이상이고 대각 정중앙이면 모서리 1장만 |
+| `tau_lean` | 이 값 미만이면 수직 붕괴로 보고 전체 타일 |
+
+`tau_*` 세 값은 물리 상수가 아니라 연출값입니다. `--no-serial` 로 25~30회
+리허설한 뒤 `fall_risk_log.csv` 의 `lean_ratio` 와 `R` 분포를 보고 정합니다.
+자세한 절차는 설계 문서 §10.3을 참고하세요.
 
 ### Per-tile targeting (which impact-mitigation tile fires)
 
@@ -47,14 +73,28 @@ missing, `main.py` still runs but always targets tile 0.
 각도(도, 시계방향 양수)를 손으로 넣습니다. 낙상 방향을 격자 좌표계로 옮길 때
 사용됩니다.
 
-### Arduino / servo signal
+### 아두이노 / 서보 신호
 
-Set `SERIAL_PORT` near the top of `main.py` to the Arduino's serial port
-(e.g. `/dev/tty.usbmodemXXXX` on macOS, `COM3` on Windows) once it's wired up.
-Each fall-risk signal sends the tile number as a line of text (e.g. `"3\n"`)
-over serial; the Arduino firmware reads that number and moves the matching
-servo. Without an Arduino connected (or `SERIAL_PORT` left as `None`), signals
-are just printed to the console so the rest of the pipeline can still be tested.
+`--port` 로 시리얼 포트를 지정합니다(예: macOS `/dev/cu.usbmodemXXXX`,
+Windows `COM3`). 생략하면 시뮬레이션 모드로 동작하며 신호는 콘솔에만 찍힙니다.
+
+프로토콜은 줄 단위 텍스트이고 보율은 115200입니다.
+
+| 파이썬 → 아두이노 | 아두이노 → 파이썬 |
+|---|---|
+| `FIRE 1,3` | `OK FIRE 1,3` |
+| `RESET` | `OK RESET` |
+| `PING` | `OK PING` |
+| — | `READY 4` (부팅 완료 시) |
+| — | `ERR <사유>` |
+| — | `# <주석, 무시됨>` |
+
+타일 번호는 어디서나 0-indexed 입니다. 타일 번호와 PCA9685 채널의 매핑은
+`.ino` 안에만 있습니다.
+
+시리얼 모니터(115200, 줄 끝 "새 줄")에서 `FIRE 1,3` 을 직접 입력하면 파이썬 없이
+하드웨어만 시험할 수 있습니다. 서보 4개 동시 기동은 `FIRE 0,1,2,3` 으로
+확인하세요 — 전원 용량이 부족하면 보드가 리셋됩니다.
 
 ### Working of the Prototype
 [Working Demo with Fall Detection and Face Recognition](https://drive.google.com/file/d/1HhNCq11J1ZNmuDoxo6KYVFS1S7IJZid7/view?usp=sharing)
