@@ -1,9 +1,9 @@
 import facial_recognition as fr
+import calibration
 
 import sys
 import os
 import csv
-import json
 import math
 import cv2
 import numpy as np
@@ -27,7 +27,6 @@ RISK_COOLDOWN = 3.0         # seconds to wait before raising another risk signal
 RESET_DELAY = 2.0           # seconds after firing before sending the "return to home" signal
                              # (the Adafruit-PWM Arduino sketch doesn't auto-reset like the old one did)
 LOG_FILE = "fall_risk_log.csv"
-CALIBRATION_FILE = "calibration.json"  # created by calibrate.py
 
 SERIAL_PORT = "/dev/cu.usbmodem9888E00A2B282"  # macOS Arduino Uno R4 WiFi port
 SERIAL_BAUDRATE = 9600
@@ -96,62 +95,6 @@ def footPosition(landmarks):
     return ((left_ankle[0] + right_ankle[0]) / 2, (left_ankle[1] + right_ankle[1]) / 2)
 
 
-def load_tile_grid():
-    if not os.path.isfile(CALIBRATION_FILE):
-        print(f"Warning: {CALIBRATION_FILE} not found - run calibrate.py to enable per-tile targeting. "
-              "Falling back to tile 0 for every fall risk signal.")
-        return None
-    with open(CALIBRATION_FILE) as f:
-        data = json.load(f)
-    src = np.array(data["floor_corners_px"], dtype=np.float32)
-    dst = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float32)
-    homography = cv2.getPerspectiveTransform(src, dst)
-    return {
-        "rows": data["rows"],
-        "cols": data["cols"],
-        "homography": homography,
-        "inverse_homography": np.linalg.inv(homography),
-    }
-
-
-def pixelToTile(foot_xy, tile_grid):
-    px = np.array([[foot_xy]], dtype=np.float32)
-    u, v = cv2.perspectiveTransform(px, tile_grid["homography"])[0][0]
-    u = min(max(u, 0.0), 0.999)
-    v = min(max(v, 0.0), 0.999)
-    col = int(u * tile_grid["cols"])
-    row = int(v * tile_grid["rows"])
-    tile_index = row * tile_grid["cols"] + col
-    return row, col, tile_index
-
-
-def drawTileGrid(frame, tile_grid, active_row=None, active_col=None):
-    rows, cols = tile_grid["rows"], tile_grid["cols"]
-    inv_h = tile_grid["inverse_homography"]
-
-    def floor_to_px(u, v):
-        pt = cv2.perspectiveTransform(np.array([[[u, v]]], dtype=np.float32), inv_h)[0][0]
-        return int(pt[0]), int(pt[1])
-
-    if active_row is not None and active_col is not None:
-        corners = np.array([
-            floor_to_px(active_col / cols, active_row / rows),
-            floor_to_px((active_col + 1) / cols, active_row / rows),
-            floor_to_px((active_col + 1) / cols, (active_row + 1) / rows),
-            floor_to_px(active_col / cols, (active_row + 1) / rows),
-        ], dtype=np.int32).reshape(-1, 1, 2)
-        overlay = frame.copy()
-        cv2.fillPoly(overlay, [corners], (0, 0, 255))
-        cv2.addWeighted(overlay, 0.35, frame, 0.65, 0, dst=frame)
-
-    for r in range(rows + 1):
-        v = r / rows
-        cv2.line(frame, floor_to_px(0, v), floor_to_px(1, v), (255, 200, 0), 1)
-    for c in range(cols + 1):
-        u = c / cols
-        cv2.line(frame, floor_to_px(u, 0), floor_to_px(u, 1), (255, 200, 0), 1)
-
-
 def connect_arduino():
     if not SERIAL_PORT:
         print("No SERIAL_PORT configured - running in simulation mode (signals will only be printed).")
@@ -205,7 +148,7 @@ frr = fr.FaceRecognition()
 frr.encode_faces()
 pose_video = mp.solutions.pose.Pose(static_image_mode=False, min_detection_confidence=0.7, model_complexity=1)
 video = cv2.VideoCapture(video_source)
-tile_grid = load_tile_grid()
+tile_grid = calibration.load_tile_grid()
 arduino = connect_arduino()
 risk_model = load_risk_model()
 prob_threshold = risk_model["prob_threshold"] if risk_model else FALLBACK_PROB_THRESHOLD
@@ -263,7 +206,7 @@ while video.isOpened():
 
         if tile_grid is not None:
             foot_xy = footPosition(landmarks)
-            current_row, current_col, current_tile = pixelToTile(foot_xy, tile_grid)
+            current_row, current_col, current_tile = calibration.pixel_to_tile(foot_xy, tile_grid)
 
         vy = vx = tilt_vel = 0.0
         if prev_center is not None and prev_time is not None:
@@ -320,7 +263,7 @@ while video.isOpened():
         reset_pending = False
 
     if tile_grid is not None:
-        drawTileGrid(modified_frame, tile_grid, current_row, current_col)
+        calibration.draw_tile_grid(modified_frame, tile_grid, {current_tile} if current_row is not None else None)
 
     cv2.putText(modified_frame, f"risk: {risk_score:.2f} ({consecutive_risk_frames}/{persistence})",
                 (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)

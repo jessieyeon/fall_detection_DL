@@ -65,8 +65,17 @@ def main():
     cv2.destroyAllWindows()
 
     with open(CALIBRATION_FILE, "w") as f:
-        json.dump({"rows": rows, "cols": cols, "floor_corners_px": points}, f, indent=2)
+        json.dump({
+            "rows": rows,
+            "cols": cols,
+            "floor_corners_px": points,
+            # 카메라 광축과 타일 격자 축의 각도 차이(도). 카메라가 격자를 정면으로
+            # 보고 있으면 0. 격자가 시계방향으로 돌아 보이면 양수를 넣는다.
+            "camera_yaw_deg": 0.0,
+        }, f, indent=2)
     print(f"Saved calibration ({rows}x{cols} grid, {rows * cols} tiles) to {CALIBRATION_FILE}")
+    print("카메라가 격자를 정면에서 보고 있지 않다면 calibration.json 의 "
+          "camera_yaw_deg 를 손으로 조정하세요.")
 
 
 if __name__ == "__main__":

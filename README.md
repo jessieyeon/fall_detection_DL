@@ -42,6 +42,11 @@ top-left, top-right, bottom-right, bottom-left. This writes `calibration.json`
 (gitignored, since it's specific to one physical camera/tile setup). If it's
 missing, `main.py` still runs but always targets tile 0.
 
+`calibration.json` 에는 `camera_yaw_deg` 항목이 함께 저장됩니다. 카메라가 타일
+격자를 정면에서 보고 있으면 `0` 그대로 두고, 격자가 화면상 회전해 보이면 그
+각도(도, 시계방향 양수)를 손으로 넣습니다. 낙상 방향을 격자 좌표계로 옮길 때
+사용됩니다.
+
 ### Arduino / servo signal
 
 Set `SERIAL_PORT` near the top of `main.py` to the Arduino's serial port
