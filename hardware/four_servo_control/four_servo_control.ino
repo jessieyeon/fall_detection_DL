@@ -1,5 +1,9 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+// strtok, strcmp, strncmp / atoi. Arduino 코어가 전이적으로 끌어오는 경우가 많지만
+// 보드와 코어 버전에 따라 다르므로 명시한다.
+#include <string.h>
+#include <stdlib.h>
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
