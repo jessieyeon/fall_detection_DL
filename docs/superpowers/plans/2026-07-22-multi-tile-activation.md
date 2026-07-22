@@ -334,7 +334,14 @@ def resolve_direction(window):
     cos_sum = sum(math.cos(math.radians(d)) for d, _ in window)
     n = len(window)
 
-    mean_direction_deg = math.degrees(math.atan2(sin_sum, cos_sum)) % 360.0
+    mean_direction_deg = math.degrees(math.atan2(sin_sum, cos_sum))
+    if mean_direction_deg < 0:
+        mean_direction_deg += 360.0
+    # 부동소수점 반올림으로 인한 360 처리.
+    # 350도와 10도의 원형 평균은 atan2 가 아주 작은 음수를 내놓아
+    # `% 360.0` 만 쓰면 정확히 360.0 이 되어 [0, 360) 을 벗어난다.
+    if mean_direction_deg >= 360.0:
+        mean_direction_deg = 0.0
     R = math.hypot(sin_sum, cos_sum) / n
     mean_lean_ratio = sum(lean for _, lean in window) / n
     return mean_direction_deg, R, mean_lean_ratio
