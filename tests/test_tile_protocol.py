@@ -9,6 +9,7 @@ class FakeSerial:
     def __init__(self, responses=None):
         self.written = []
         self.closed = False
+        self.close_count = 0
         self._pending = list(responses or [])
 
     def reset_input_buffer(self):
@@ -24,6 +25,7 @@ class FakeSerial:
 
     def close(self):
         self.closed = True
+        self.close_count += 1
 
 
 def make_controller(responses):
@@ -124,3 +126,40 @@ def test_simulation_mode_does_not_write_or_raise():
     controller.connect(None)
     assert controller.fire({1, 3}) is False
     assert controller.reset() is False
+
+
+def test_connect_ignores_malformed_ready_line_and_keeps_waiting():
+    # 부팅 중 시리얼 노이즈로 "READY 4a" 같은 깨진 줄이 온 뒤 정상 READY 가 온다.
+    # int() 변환 실패로 connect() 가 죽어서는 안 되고, 깨진 줄을 유효한 핸드셰이크로
+    # 받아들여서도 안 된다 - 다음 줄까지 계속 기다려야 한다.
+    controller, _ = make_controller(["READY 4a", "READY 4"])
+    assert controller.connect("/dev/fake") == 4
+    assert controller.simulated is False
+    assert controller.servo_count == 4
+
+
+def test_connect_with_only_malformed_ready_lines_falls_back_to_simulation():
+    # 깨진 READY 줄만 계속 오고 마감 시간까지 정상 줄이 오지 않으면
+    # 예외 없이 시뮬레이션 모드로 대체되어야 한다.
+    controller, fake = make_controller(["READY \x00", "READY 4a"])
+    assert controller.connect("/dev/fake", ready_timeout=0.2) == 0
+    assert controller.simulated is True
+    assert fake.closed is True
+
+
+def test_reconnect_closes_previous_serial_handle():
+    first_fake = FakeSerial(["READY 4"])
+    second_fake = FakeSerial(["READY 4"])
+    fakes = [first_fake, second_fake]
+
+    def factory(port, baud, read_timeout):
+        return fakes.pop(0)
+
+    controller = tile_protocol.TileController(serial_factory=factory)
+    assert controller.connect("/dev/fake") == 4
+    assert first_fake.closed is False
+
+    assert controller.connect("/dev/fake") == 4
+    assert first_fake.closed is True
+    assert first_fake.close_count == 1
+    assert second_fake.closed is False
