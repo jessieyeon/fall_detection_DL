@@ -838,8 +838,15 @@ class TileController:
             if line is None:
                 continue
             if line.startswith("READY"):
+                # 부팅 중 라인 노이즈로 "READY 4a" 같은 줄이 올 수 있다. 핸드셰이크는
+                # 바로 그런 잡음을 넘기려고 존재하므로, 파싱 실패는 예외가 아니라
+                # 실패한 시도로 취급하고 다음 줄을 계속 기다린다.
                 parts = line.split()
-                self.servo_count = int(parts[1]) if len(parts) > 1 else 0
+                try:
+                    servo_count = int(parts[1]) if len(parts) > 1 else 0
+                except ValueError:
+                    continue
+                self.servo_count = servo_count
                 self.simulated = False
                 print(f"[타일] 아두이노 연결됨 - 서보 {self.servo_count}개")
                 return self.servo_count
