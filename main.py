@@ -124,62 +124,68 @@ def main():
     reset_pending = False
     active_tiles = set()
 
-    for frame in source.frames():
-        now = frame.timestamp
+    try:
+        for frame in source.frames():
+            now = frame.timestamp
 
-        if frame.landmarks is None:
-            # 추적 상실 - 오래된 방향이 다음 낙상 판정에 섞이면 안 된다
-            window.clear()
-            consecutive_risk_frames = 0
-        else:
-            window.append((frame.direction_deg, frame.lean_ratio))
-            consecutive_risk_frames = consecutive_risk_frames + 1 if frame.is_risky else 0
+            if frame.landmarks is None:
+                # 추적 상실 - 오래된 방향이 다음 낙상 판정에 섞이면 안 된다
+                window.clear()
+                consecutive_risk_frames = 0
+            else:
+                window.append((frame.direction_deg, frame.lean_ratio))
+                consecutive_risk_frames = consecutive_risk_frames + 1 if frame.is_risky else 0
 
-        if (consecutive_risk_frames >= persistence
-                and (now - last_risk_time) > RISK_COOLDOWN):
-            direction_deg, R, lean_ratio = tiles.resolve_direction(window)
-            fired = tiles.select_tiles(
-                direction_deg, R, lean_ratio, rows, cols,
-                profile.tau_R, profile.tau_R_strict, profile.tau_lean)
+            if (consecutive_risk_frames >= persistence
+                    and (now - last_risk_time) > RISK_COOLDOWN):
+                direction_deg, R, lean_ratio = tiles.resolve_direction(window)
+                fired = tiles.select_tiles(
+                    direction_deg, R, lean_ratio, rows, cols,
+                    profile.tau_R, profile.tau_R_strict, profile.tau_lean)
 
-            ack = False if args.no_serial else controller.fire(fired)
-            print(f"[낙상 위험] score={frame.risk_score:.2f} "
-                  f"dir={direction_deg:.1f}도 R={R:.2f} lean={lean_ratio:.2f} "
-                  f"-> 타일 {sorted(fired)} ({len(fired)}장) ack={ack}")
-            log_event(profile.name, frame.face_name, frame.risk_score,
-                      direction_deg, lean_ratio, R, fired, ack)
+                ack = False if args.no_serial else controller.fire(fired)
+                print(f"[낙상 위험] score={frame.risk_score:.2f} "
+                      f"dir={direction_deg:.1f}도 R={R:.2f} lean={lean_ratio:.2f} "
+                      f"-> 타일 {sorted(fired)} ({len(fired)}장) ack={ack}")
+                log_event(profile.name, frame.face_name, frame.risk_score,
+                          direction_deg, lean_ratio, R, fired, ack)
 
-            active_tiles = fired
-            last_risk_time = now
-            consecutive_risk_frames = 0
-            reset_pending = True
+                active_tiles = fired
+                last_risk_time = now
+                consecutive_risk_frames = 0
+                reset_pending = True
 
-        if reset_pending and (now - last_risk_time) > RESET_DELAY:
-            if not args.no_serial:
-                controller.reset()
-            reset_pending = False
-            active_tiles = set()
+            if reset_pending and (now - last_risk_time) > RESET_DELAY:
+                if not args.no_serial:
+                    controller.reset()
+                reset_pending = False
+                active_tiles = set()
 
-        image = frame.image
-        if tile_grid is not None:
-            calibration.draw_tile_grid(image, tile_grid, active_tiles)
+            image = frame.image
+            if tile_grid is not None:
+                calibration.draw_tile_grid(image, tile_grid, active_tiles)
 
-        cv2.putText(image,
-                    f"risk {frame.risk_score:.2f} "
-                    f"({consecutive_risk_frames}/{persistence})",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-        if frame.direction_deg is not None:
             cv2.putText(image,
-                        f"dir {frame.direction_deg:.0f} lean {frame.lean_ratio:.2f}",
-                        (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
-        if controller.simulated and not args.no_serial:
-            cv2.putText(image, "NO ARDUINO (simulated)", (10, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                        f"risk {frame.risk_score:.2f} "
+                        f"({consecutive_risk_frames}/{persistence})",
+                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            if frame.direction_deg is not None:
+                cv2.putText(image,
+                            f"dir {frame.direction_deg:.0f} lean {frame.lean_ratio:.2f}",
+                            (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+            if controller.simulated and not args.no_serial:
+                cv2.putText(image, "NO ARDUINO (simulated)", (10, 90),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
-        cv2.imshow("Fall Detection", image)
-        if (cv2.waitKey(1) & 0xFF) == 27:
-            break
+            cv2.imshow("Fall Detection", image)
+            if (cv2.waitKey(1) & 0xFF) == 27:
+                break
+    except KeyboardInterrupt:
+        print("종료...")
 
+    # 미송된 reset 신호 처리
+    if reset_pending and not args.no_serial:
+        controller.reset()
     source.release()
     cv2.destroyAllWindows()
     controller.close()
