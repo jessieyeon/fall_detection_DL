@@ -77,3 +77,73 @@ def resolve_direction(window):
     R = math.hypot(sin_sum, cos_sum) / n
     mean_lean_ratio = sum(lean for _, lean in window) / n
     return mean_direction_deg, R, mean_lean_ratio
+
+
+# 규칙 3 이 발동하려면 방향이 대각 중심에서 이 각도 이내여야 한다.
+# 구간 경계 부근(예: 30도)에서 확신이 높다는 이유만으로 모서리 한 장에
+# 투신하는 것을 막는다.
+DIAGONAL_TOLERANCE_DEG = 10.0
+
+# 대각 섹터(1, 3, 5, 7)의 반대편 섹터
+_OPPOSITE_SECTOR = {1: 5, 3: 7, 5: 1, 7: 3}
+
+
+def _sector_of(direction_deg):
+    """방향을 8구간(0=먼쪽, 1=먼쪽·우, 2=우, ...)으로 양자화한다.
+
+    round() 대신 floor(x + 0.5) 를 쓴다. 파이썬의 round() 는 은행가 반올림이라
+    22.5 와 67.5 같은 정확한 경계값에서 올림/내림이 엇갈린다.
+    """
+    return int(math.floor((direction_deg % 360.0) / 45.0 + 0.5)) % 8
+
+
+def _corner_tile(sector, rows, cols):
+    """대각 섹터에 해당하는 모서리 타일 번호 (행 우선 번호 규약)."""
+    if sector == 1:                      # 먼쪽·우
+        return cols - 1
+    if sector == 3:                      # 가까운쪽·우
+        return rows * cols - 1
+    if sector == 5:                      # 가까운쪽·좌
+        return (rows - 1) * cols
+    return 0                             # 7: 먼쪽·좌
+
+
+def _angle_offset(direction_deg, center_deg):
+    """두 각도의 최단 거리(0~180)."""
+    return abs((direction_deg - center_deg + 180.0) % 360.0 - 180.0)
+
+
+def select_tiles(direction_deg, R, lean_ratio, rows, cols,
+                 tau_R, tau_R_strict, tau_lean):
+    """낙상 방향과 확신도에서 작동시킬 타일 집합을 결정한다.
+
+    순수 함수다. 하드웨어도 카메라도 필요 없다.
+    반환 집합의 크기는 항상 1, 2, 3, 4 중 하나이며 빈 집합이 아니다.
+    """
+    all_tiles = set(range(rows * cols))
+
+    # 게이트: 판정이 불확실하면 전부 켠다. 규칙보다 우선한다.
+    #   R < tau_R        방향이 프레임마다 튐 - 판정 불가
+    #   lean < tau_lean  수직으로 주저앉음 - 방향이 애초에 존재하지 않음
+    if R < tau_R or lean_ratio < tau_lean:
+        return all_tiles
+
+    sector = _sector_of(direction_deg)
+
+    # 규칙 1: 정방향 -> 그 방향의 행 또는 열 전체
+    if sector % 2 == 0:
+        if sector == 0:                                        # 먼 쪽
+            return {c for c in range(cols)}
+        if sector == 2:                                        # 우
+            return {r * cols + (cols - 1) for r in range(rows)}
+        if sector == 4:                                        # 가까운 쪽
+            return {(rows - 1) * cols + c for c in range(cols)}
+        return {r * cols for r in range(rows)}                  # 6: 좌
+
+    # 규칙 3: 대각이면서 방향이 아주 깨끗하면 모서리 한 장만
+    if (R >= tau_R_strict
+            and _angle_offset(direction_deg, sector * 45.0) <= DIAGONAL_TOLERANCE_DEG):
+        return {_corner_tile(sector, rows, cols)}
+
+    # 규칙 2: 대각 -> 전체에서 반대편 모서리 한 장 제외
+    return all_tiles - {_corner_tile(_OPPOSITE_SECTOR[sector], rows, cols)}
