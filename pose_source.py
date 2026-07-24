@@ -200,8 +200,10 @@ class PoseSource:
                 risk_score = vy
                 is_risky = vy > VELOCITY_THRESHOLD
 
-            direction_deg, lean_ratio = tiles.lean_from_landmarks(
-                landmarks, self.camera_yaw_deg)
+            # 방향은 몸통 중심의 화면 이동(vx, vy)에서, lean 은 화면 기울기(tilt)에서
+            # 구한다. 둘 다 이미지 좌표만 쓰므로 신뢰 못 할 z 에 의존하지 않는다.
+            direction_deg = tiles.direction_from_motion(vx, vy, self.camera_yaw_deg)
+            lean_ratio = tiles.lean_from_tilt(tilt)
 
             self._prev_center = center
             self._prev_tilt = tilt

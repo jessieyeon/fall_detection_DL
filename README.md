@@ -56,12 +56,22 @@ Tiles are laid out in a grid on the floor, numbered `0..rows*cols-1` in row-majo
 order (row 0 left-to-right, then row 1, ...). `main.py` does **not** use the
 detected person's foot position to pick a tile — ankle landmarks are unreliable
 in this setup (easily occluded, poorly tracked on the doll), so the design
-deliberately avoids them. Instead the fall's *direction* (torso lean, from
-shoulder and hip landmarks) and its agreement across the recent frame window
-decide the tiles: a clear cardinal direction fires a whole row/column (2 tiles),
-a clear diagonal fires 3 tiles (everything but the far corner), a very confident
-diagonal fires a single corner tile, and a low-confidence or mostly-vertical
-reading fires every tile (1 to 4 tiles total, see `tiles.select_tiles`).
+deliberately avoids them. Instead the fall's *direction* — **which way the body
+moves in the image** (the torso center's motion, `vx`/`vy`) — and its agreement
+across the recent frame window decide the tiles: a clear cardinal direction fires
+a whole row/column (2 tiles), a clear diagonal fires 3 tiles (everything but the
+far corner), a very confident diagonal fires a single corner tile, and a
+low-confidence or mostly-vertical reading fires every tile (1 to 4 tiles total,
+see `tiles.select_tiles`).
+
+**Camera placement matters.** Near/far (toward vs away from the camera) is read
+from vertical image motion, so the camera must look **down at the floor from an
+elevated, oblique angle** (like a high room corner) — the same viewpoint the
+Le2i training videos use. A front, eye-level camera cannot tell a forward fall
+from a backward one (both just foreshorten in 2D), which collapses every fall to
+the "near" direction and leaves the far-row tiles unused. A direct top-down
+(bird's-eye) view is also wrong — MediaPipe pose estimation breaks there. Set
+`camera_yaw_deg` in `calibration.json` if the grid looks rotated in frame.
 
 Run the calibration tool once per camera setup (whenever the camera or tile grid moves):
 

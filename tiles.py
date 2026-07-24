@@ -4,52 +4,49 @@
 의존하지 않으므로 카메라나 아두이노 없이 전부 단위 테스트로 검증된다.
 
 각도 규약: 0도 = 격자 위쪽(카메라에서 먼 쪽), 시계방향 증가.
-           90도 = 우, 180도 = 앞(카메라 쪽), 270도 = 좌.
+           90도 = 우, 180도 = 가까운 쪽(화면 아래), 270도 = 좌.
+
+방향은 몸통 중심이 "화면에서 이동하는 방향"으로 구한다(direction_from_motion).
+예전에는 어깨-엉덩이 벡터의 MediaPipe z 성분으로 앞/뒤를 갈랐지만, z(단안 깊이
+추정)는 앞으로 기우는지 뒤로 기우는지를 신뢰성 있게 구분하지 못해 방향이 거의
+항상 "가까움(180도)"으로 붙어버렸다. 카메라를 비스듬히 위에서 내려보게 두면
+바닥 위 낙상 방향이 화면 평면의 이동(dx, dy)으로 그대로 나타나므로, 신뢰할 수
+있는 픽셀 이동만으로 4방향을 가른다.
 """
 
 import math
 
-# MediaPipe Pose 랜드마크 인덱스 (main.py 의 기존 정의와 동일하게 유지)
-L_SHOULDER, R_SHOULDER = 11, 12
-L_HIP, R_HIP = 23, 24
+# 이 속도 미만이면 이동 방향이 잡음이라 사실상 방향이 없다고 본다. 단위는
+# pose_source 가 넘겨주는 vx, vy 와 같다(프레임당 화면비 정규화 이동 / 초).
+MOTION_EPS = 1e-9
 
 
-def _midpoint(landmarks, left_index, right_index):
-    left = landmarks[left_index]
-    right = landmarks[right_index]
-    return (
-        (left[0] + right[0]) / 2.0,
-        (left[1] + right[1]) / 2.0,
-        (left[2] + right[2]) / 2.0,
-    )
+def direction_from_motion(vx, vy, camera_yaw_deg=0.0):
+    """몸통 중심의 화면 이동 벡터에서 낙상 방향을 구한다.
 
+    vx: + = 화면 오른쪽으로 이동.  vy: + = 화면 아래로 이동(이미지 좌표).
+    비스듬히 내려보는 카메라에서 화면 이동 방향이 곧 바닥 낙상 방향이다.
 
-def lean_from_landmarks(landmarks, camera_yaw_deg=0.0):
-    """어깨 중점에서 엉덩이 중점으로 향하는 몸통 벡터에서 낙상 방향을 구한다.
-
-    발목(27, 28)은 쓰지 않는다. 집 모형 안에서 가려지기 쉽고 인형에서 인식되지
-    않을 위험이 크기 때문이다. 어깨와 엉덩이는 낙상 모델의 입력이라 어차피 잘
-    인식되어야만 하는 값이다.
-
-    반환값 (direction_deg, lean_ratio):
-      direction_deg  [0, 360). 몸통이 기운 방향.
-      lean_ratio     [0, 1]. 기울기의 사인값. 0 = 직립, 1 = 완전히 누움.
-                     화면상 크기에 무관하므로 인형과 사람에 같은 임계값을 쓸 수 있다.
+    반환값 direction_deg [0, 360). 0=먼쪽(위), 90=우, 180=가까움(아래), 270=좌.
+    이동이 거의 없으면(정지) 0.0 을 돌려준다 - 이런 프레임은 위험 프레임이
+    아니라 방향 판정 창에 들어가지 않는다.
     """
-    sx, sy, sz = _midpoint(landmarks, L_SHOULDER, R_SHOULDER)
-    hx, hy, hz = _midpoint(landmarks, L_HIP, R_HIP)
+    if math.hypot(vx, vy) < MOTION_EPS:
+        return 0.0
+    # atan2(vx, -vy): 화면 위(-vy)를 0도로, 시계방향으로 우(+vx)=90도.
+    return (math.degrees(math.atan2(vx, -vy)) - camera_yaw_deg) % 360.0
 
-    dx = sx - hx           # + = 오른쪽
-    dy = sy - hy           # + = 아래 (이미지 좌표)
-    dz = sz - hz           # + = 카메라에서 멀어짐
 
-    torso_length = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if torso_length < 1e-6:
-        return 0.0, 0.0
+def lean_from_tilt(tilt_deg):
+    """몸통의 화면상 기울기 각도(0=직립, 90=완전히 누움)를 lean_ratio 로 바꾼다.
 
-    lean_ratio = math.hypot(dx, dz) / torso_length
-    direction_deg = (math.degrees(math.atan2(dx, dz)) - camera_yaw_deg) % 360.0
-    return direction_deg, lean_ratio
+    tilt_deg 는 pose_source 가 모델 입력 특징으로 이미 계산하는 값으로,
+    이미지 좌표만으로(atan2(|dx|,|dy|)) 구하므로 z 에 의존하지 않는다.
+
+    반환값 lean_ratio [0, 1] = sin(tilt). 0 = 직립, 1 = 완전히 누움.
+    화면상 크기에 무관하므로 인형과 사람에 같은 임계값을 쓸 수 있다.
+    """
+    return math.sin(math.radians(tilt_deg))
 
 
 def resolve_direction(window):

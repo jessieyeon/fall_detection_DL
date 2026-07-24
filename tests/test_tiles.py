@@ -5,85 +5,60 @@ import pytest
 import tiles
 
 
-def make_landmarks(shoulder, hip):
-    """MediaPipe Pose 랜드마크 33개짜리 리스트를 만들되 어깨(11,12)와
-    엉덩이(23,24)만 채운다. 나머지는 이 모듈이 읽지 않는다."""
-    lm = [(0.0, 0.0, 0.0)] * 33
-    lm[tiles.L_SHOULDER] = shoulder
-    lm[tiles.R_SHOULDER] = shoulder
-    lm[tiles.L_HIP] = hip
-    lm[tiles.R_HIP] = hip
-    return lm
+# --- 방향: 몸통 중심의 화면 이동(vx, vy)에서 뽑는다 ---
+# vx: +오른쪽, vy: +아래(화면 좌표). 비스듬히 내려보는 카메라에서 화면 이동
+# 방향이 곧 바닥 낙상 방향이다. MediaPipe z(단안 깊이)는 앞/뒤를 못 가려서 쓰지
+# 않는다. 규약: 0=먼쪽(화면 위), 90=우, 180=가까움(화면 아래), 270=좌.
+
+def test_motion_right_is_90_degrees():
+    assert tiles.direction_from_motion(1.0, 0.0) == pytest.approx(90.0)
 
 
-def test_upright_torso_has_zero_lean_ratio():
-    # 어깨가 엉덩이 바로 위(이미지 y는 아래가 +)
-    lm = make_landmarks(shoulder=(100.0, 100.0, 0.0), hip=(100.0, 200.0, 0.0))
-    _, lean_ratio = tiles.lean_from_landmarks(lm)
-    assert lean_ratio == pytest.approx(0.0, abs=1e-6)
+def test_motion_down_toward_camera_is_180_degrees():
+    # 화면에서 아래로 이동 = 카메라 쪽(가까움)
+    assert tiles.direction_from_motion(0.0, 1.0) == pytest.approx(180.0)
 
 
-def test_leaning_right_is_90_degrees():
-    # 어깨가 엉덩이보다 오른쪽(+x)
-    lm = make_landmarks(shoulder=(200.0, 100.0, 0.0), hip=(100.0, 200.0, 0.0))
-    direction, lean_ratio = tiles.lean_from_landmarks(lm)
-    assert direction == pytest.approx(90.0)
-    assert lean_ratio == pytest.approx(math.sqrt(0.5))
+def test_motion_up_away_from_camera_is_0_degrees():
+    # 화면에서 위로 이동 = 카메라 반대(먼 쪽)
+    assert tiles.direction_from_motion(0.0, -1.0) == pytest.approx(0.0)
 
 
-def test_leaning_left_is_270_degrees():
-    lm = make_landmarks(shoulder=(0.0, 100.0, 0.0), hip=(100.0, 200.0, 0.0))
-    direction, _ = tiles.lean_from_landmarks(lm)
-    assert direction == pytest.approx(270.0)
+def test_motion_left_is_270_degrees():
+    assert tiles.direction_from_motion(-1.0, 0.0) == pytest.approx(270.0)
 
 
-def test_leaning_away_from_camera_is_0_degrees():
-    # z 가 커질수록 카메라에서 멀어진다
-    lm = make_landmarks(shoulder=(100.0, 100.0, 100.0), hip=(100.0, 200.0, 0.0))
-    direction, _ = tiles.lean_from_landmarks(lm)
-    assert direction == pytest.approx(0.0)
+def test_motion_diagonal_up_right_is_45_degrees():
+    # 오른쪽 + 위(먼쪽) = 먼쪽·우 대각
+    assert tiles.direction_from_motion(1.0, -1.0) == pytest.approx(45.0)
 
 
-def test_leaning_toward_camera_is_180_degrees():
-    lm = make_landmarks(shoulder=(100.0, 100.0, -100.0), hip=(100.0, 200.0, 0.0))
-    direction, _ = tiles.lean_from_landmarks(lm)
-    assert direction == pytest.approx(180.0)
-
-
-def test_diagonal_landmarks_give_45_degrees():
-    # dx, dz 둘 다 0이 아닌 진짜 대각 사례 - 1장/3장 선택의 헤드라인 기능이
-    # 실제로 어깨/엉덩이 랜드마크에서 끝까지 나오는지 확인한다
-    lm = make_landmarks(shoulder=(200.0, 100.0, 100.0), hip=(100.0, 200.0, 0.0))
-    direction, _ = tiles.lean_from_landmarks(lm)
-    assert direction == pytest.approx(45.0)
-
-
-def test_diagonal_landmarks_give_225_degrees_in_mirrored_quadrant():
-    # 반대쪽 사분면(좌 + 카메라 쪽)도 동일하게 확인한다
-    lm = make_landmarks(shoulder=(0.0, 100.0, -100.0), hip=(100.0, 200.0, 0.0))
-    direction, _ = tiles.lean_from_landmarks(lm)
-    assert direction == pytest.approx(225.0)
+def test_motion_diagonal_down_left_is_225_degrees():
+    # 왼쪽 + 아래(가까움) = 가까운쪽·좌 대각
+    assert tiles.direction_from_motion(-1.0, 1.0) == pytest.approx(225.0)
 
 
 def test_camera_yaw_rotates_the_direction():
     # 카메라가 격자 대비 90도 돌아가 있으면 "이미지상 우측"이 격자상 0도가 된다
-    lm = make_landmarks(shoulder=(200.0, 100.0, 0.0), hip=(100.0, 200.0, 0.0))
-    direction, _ = tiles.lean_from_landmarks(lm, camera_yaw_deg=90.0)
-    assert direction == pytest.approx(0.0)
+    assert tiles.direction_from_motion(1.0, 0.0, camera_yaw_deg=90.0) == pytest.approx(0.0)
 
 
-def test_fully_horizontal_torso_has_lean_ratio_one():
-    # 어깨와 엉덩이의 y가 같으면 완전히 누운 상태
-    lm = make_landmarks(shoulder=(200.0, 100.0, 0.0), hip=(100.0, 100.0, 0.0))
-    _, lean_ratio = tiles.lean_from_landmarks(lm)
-    assert lean_ratio == pytest.approx(1.0)
+def test_no_motion_returns_degenerate_zero():
+    # 정지 상태(속도 ~0)는 방향이 없다. 위험 프레임이 아니므로 창에 들어가지도 않지만
+    # 나눗셈 오류 없이 0을 돌려줘야 한다.
+    assert tiles.direction_from_motion(0.0, 0.0) == 0.0
 
 
-def test_degenerate_zero_length_torso_does_not_divide_by_zero():
-    lm = make_landmarks(shoulder=(100.0, 100.0, 0.0), hip=(100.0, 100.0, 0.0))
-    direction, lean_ratio = tiles.lean_from_landmarks(lm)
-    assert direction == 0.0
-    assert lean_ratio == 0.0
+def test_lean_from_tilt_upright_is_zero():
+    assert tiles.lean_from_tilt(0.0) == pytest.approx(0.0)
+
+
+def test_lean_from_tilt_horizontal_is_one():
+    assert tiles.lean_from_tilt(90.0) == pytest.approx(1.0)
+
+
+def test_lean_from_tilt_45_degrees():
+    assert tiles.lean_from_tilt(45.0) == pytest.approx(math.sqrt(0.5))
 
 
 def test_circular_mean_wraps_around_zero():
