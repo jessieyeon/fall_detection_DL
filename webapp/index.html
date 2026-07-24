@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>낙상 감지 모니터</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --line:#2a3140; --ink:#e6edf3; --muted:#8b949e;
+    --skel:#5dcaa5; --joint:#9fe1cb; --tile:#20262f; --tile-edge:#3a4352;
+    --fire:#f0997b; --fire-edge:#d85a30; --warn:#ed4a4a;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; overflow:hidden;}
+  #stage{position:fixed; inset:0;}
+  canvas{display:block; width:100%; height:100%;}
+
+  /* 상태 표시줄 */
+  #topbar{position:fixed; top:0; left:0; right:0; padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;
+    display:flex; align-items:center; gap:10px; pointer-events:none; z-index:5;}
+  #dot{width:9px; height:9px; border-radius:50%; background:var(--warn); flex:none;
+    box-shadow:0 0 0 0 rgba(93,202,165,.5);}
+  #dot.live{background:var(--skel); animation:pulse 2s infinite;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(93,202,165,.45)}70%{box-shadow:0 0 0 7px rgba(93,202,165,0)}100%{box-shadow:0 0 0 0 rgba(93,202,165,0)}}
+  #status{font-size:13px; color:var(--muted); font-weight:500;}
+  #riskwrap{margin-left:auto; width:96px; height:6px; background:#222a35; border-radius:99px; overflow:hidden;}
+  #riskbar{height:100%; width:0%; background:var(--skel); border-radius:99px; transition:width .12s linear, background .2s;}
+
+  /* 낙상 배너 */
+  #banner{position:fixed; left:12px; right:12px; top:calc(env(safe-area-inset-top) + 46px);
+    background:var(--warn); color:#fff; border-radius:14px; padding:14px 16px; z-index:10;
+    display:flex; align-items:center; gap:12px; font-weight:700; font-size:16px;
+    box-shadow:0 10px 30px rgba(0,0,0,.4); transform:translateY(-140%); opacity:0;
+    transition:transform .35s cubic-bezier(.2,1.3,.4,1), opacity .35s;}
+  #banner.show{transform:translateY(0); opacity:1;}
+  #banner .big{font-size:22px; line-height:1;}
+  #banner .sub{font-weight:500; font-size:13px; opacity:.9; margin-top:2px;}
+
+  #hint{position:fixed; bottom:calc(env(safe-area-inset-bottom) + 10px); left:0; right:0;
+    text-align:center; font-size:12px; color:var(--muted); z-index:5; pointer-events:none;}
+</style>
+</head>
+<body>
+  <div id="stage"><canvas id="c"></canvas></div>
+
+  <div id="topbar">
+    <div id="dot"></div>
+    <div id="status">연결 중…</div>
+    <div id="riskwrap"><div id="riskbar"></div></div>
+  </div>
+
+  <div id="banner">
+    <div class="big">⚠️</div>
+    <div><div id="banner-title">낙상 감지</div><div class="sub" id="banner-sub"></div></div>
+  </div>
+
+  <div id="hint">사람 아래 격자가 실제 타일 · 발사되면 솟아오릅니다</div>
+
+<script>
+(function(){
+  "use strict";
+  const cv = document.getElementById("c");
+  const ctx = cv.getContext("2d");
+  const statusEl = document.getElementById("status");
+  const dotEl = document.getElementById("dot");
+  const riskBar = document.getElementById("riskbar");
+  const banner = document.getElementById("banner");
+  const bannerTitle = document.getElementById("banner-title");
+  const bannerSub = document.getElementById("banner-sub");
+
+  // 그릴 관절 연결 (MediaPipe Pose 인덱스). 얼굴 잡티 없이 깔끔한 스틱피겨.
+  const BONES = [
+    [11,12],[11,13],[13,15],[12,14],[14,16],
+    [11,23],[12,24],[23,24],
+    [23,25],[25,27],[24,26],[26,28],
+    [0,11],[0,12]
+  ];
+  const JOINTS = [0,11,12,13,14,15,16,23,24,25,26,27,28];
+
+  let dpr = 1, W = 0, H = 0;
+  function resize(){
+    dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", ()=>setTimeout(resize,200));
+  resize();
+
+  // ---- 상태 ----
+  let landmarks = null;         // 정규화 0~1 좌표 배열
+  let grid = {rows:2, cols:2};
+  let tiles = [];               // 각 타일의 애니메이션 상태 { lift, target }
+  let lastPoseTs = 0;
+
+  function ensureTiles(n){
+    if (tiles.length !== n){
+      tiles = Array.from({length:n}, ()=>({lift:0, target:0}));
+    }
+  }
+  ensureTiles(grid.rows*grid.cols);
+
+  // ---- WebSocket ----
+  let ws = null, retry = null;
+  function connect(){
+    const url = (location.protocol==="https:"?"wss://":"ws://") + location.host + "/ws";
+    try { ws = new WebSocket(url); } catch(e){ scheduleRetry(); return; }
+    ws.onopen = ()=>{ setStatus(true,"연결됨 · 대기 중"); };
+    ws.onclose = ()=>{ setStatus(false,"연결 끊김 · 재시도…"); scheduleRetry(); };
+    ws.onerror = ()=>{ try{ws.close();}catch(e){} };
+    ws.onmessage = (ev)=>{
+      let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
+      if (m.type==="pose"){
+        landmarks = m.landmarks;
+        lastPoseTs = performance.now();
+        const risk = m.risk||0, prog = m.prog||[0,1];
+        riskBar.style.width = Math.max(0,Math.min(100,risk*100)) + "%";
+        riskBar.style.background = risk>0.66 ? "var(--fire)" : "var(--skel)";
+        setStatus(true, landmarks ? `추적 중 · 누적 ${prog[0]}/${prog[1]}` : "사람 탐색 중…");
+      } else if (m.type==="fall"){
+        grid = {rows:m.rows||2, cols:m.cols||2};
+        ensureTiles(grid.rows*grid.cols);
+        (m.tiles||[]).forEach(i=>{ if(tiles[i]) tiles[i].target = 1; });
+        showBanner(m.tiles||[], m.direction);
+      } else if (m.type==="reset"){
+        tiles.forEach(t=>t.target=0);
+        hideBanner();
+      }
+    };
+  }
+  function scheduleRetry(){ clearTimeout(retry); retry=setTimeout(connect,1500); }
+  function setStatus(live,msg){ dotEl.classList.toggle("live",!!live); statusEl.textContent=msg; }
+
+  let bannerTimer=null;
+  function showBanner(tileList, dir){
+    bannerTitle.textContent = "낙상 감지";
+    const tstr = tileList.length ? tileList.join(", ") : "전체";
+    bannerSub.textContent = `작동 타일: ${tstr}` + (dir!=null?`  ·  방향 ${dir}°`:"");
+    banner.classList.add("show");
+    clearTimeout(bannerTimer);
+    bannerTimer=setTimeout(hideBanner, 4500);
+  }
+  function hideBanner(){ banner.classList.remove("show"); }
+
+  // ---- 렌더 루프 ----
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    // 레이아웃: 위쪽은 사람 무대, 아래쪽은 타일 바닥.
+    const floorTop = H*0.60;
+    drawFloor(floorTop);
+    drawSkeleton(0, 0, W, floorTop);
+
+    // 타일 리프트 애니메이션 진행
+    for (const t of tiles){
+      t.lift += (t.target - t.lift) * 0.18;
+      if (Math.abs(t.target - t.lift) < 0.002) t.lift = t.target;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  function drawFloor(top){
+    const rows=grid.rows, cols=grid.cols;
+    const padX = W*0.10, padBottom = H*0.10;
+    const gw = W - padX*2;
+    const gh = (H - padBottom) - top;
+    const cellW = gw/cols, cellH = gh/rows;
+    const gap = Math.min(cellW,cellH)*0.06;
+
+    // 원근감을 살짝 주려고 위쪽(먼 쪽) 행을 좁힌다.
+    for (let r=0; r<rows; r++){
+      for (let c=0; c<cols; c++){
+        const idx = r*cols + c;
+        const t = tiles[idx] || {lift:0};
+        const persp = 0.86 + 0.14*((r+0.5)/rows); // 뒤쪽이 살짝 좁음
+        const cx = padX + c*cellW + cellW/2;
+        const w = (cellW-gap)*persp;
+        const h = (cellH-gap)*persp;
+        const x = cx - w/2;
+        const y = top + r*cellH + gap/2;
+        const lift = t.lift * Math.min(28, h*0.5);
+
+        // 그림자
+        ctx.fillStyle = "rgba(0,0,0,"+(0.25+0.25*t.lift)+")";
+        roundRect(x+4, y+h-2+lift*0.3, w, h, 10); ctx.fill();
+
+        // 솟아오른 옆면(두께)
+        if (t.lift>0.02){
+          ctx.fillStyle = "#a8431f";
+          roundRect(x, y - lift + h*0.12, w, h, 10); ctx.fill();
+        }
+
+        // 윗면
+        const fired = t.lift>0.02;
+        ctx.fillStyle = fired ? "#f0997b" : "#20262f";
+        ctx.strokeStyle = fired ? "#d85a30" : "#3a4352";
+        ctx.lineWidth = 2;
+        roundRect(x, y - lift, w, h, 10); ctx.fill(); ctx.stroke();
+
+        // 번호
+        ctx.fillStyle = fired ? "#3a1608" : "#5a6472";
+        ctx.font = "600 "+Math.round(Math.min(w,h)*0.26)+"px system-ui";
+        ctx.textAlign="center"; ctx.textBaseline="middle";
+        ctx.fillText(idx, x+w/2, y - lift + h/2);
+      }
+    }
+  }
+
+  function drawSkeleton(ox, oy, w, h){
+    const stale = performance.now() - lastPoseTs > 700;
+    if (!landmarks || stale){
+      ctx.fillStyle="#586173"; ctx.font="600 15px system-ui";
+      ctx.textAlign="center"; ctx.textBaseline="middle";
+      ctx.fillText(landmarks?"": "사람을 찾는 중…", ox+w/2, oy+h/2);
+      return;
+    }
+    // 정규화 좌표를 무대 영역에 맞춘다. 여백을 줘서 잘리지 않게.
+    const mx = w*0.14, my = h*0.10;
+    const sx = v => ox + mx + v*(w - mx*2);
+    const sy = v => oy + my + v*(h - my*2);
+
+    ctx.lineCap="round"; ctx.lineJoin="round";
+    ctx.strokeStyle="#5dcaa5"; ctx.lineWidth=Math.max(3, w*0.010);
+    for (const [a,b] of BONES){
+      const pa=landmarks[a], pb=landmarks[b];
+      if(!pa||!pb) continue;
+      ctx.beginPath(); ctx.moveTo(sx(pa[0]),sy(pa[1])); ctx.lineTo(sx(pb[0]),sy(pb[1])); ctx.stroke();
+    }
+    ctx.fillStyle="#9fe1cb";
+    const jr=Math.max(3.5, w*0.012);
+    for (const i of JOINTS){
+      const p=landmarks[i]; if(!p) continue;
+      ctx.beginPath(); ctx.arc(sx(p[0]),sy(p[1]),jr,0,Math.PI*2); ctx.fill();
+    }
+  }
+
+  function roundRect(x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  }
+
+  connect();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

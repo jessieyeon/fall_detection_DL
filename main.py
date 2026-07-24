@@ -44,6 +44,11 @@ def parse_args():
     parser.add_argument("--face-every", type=int, default=0,
                         help="N프레임마다 얼굴 인식. 0이면 비활성(기본). "
                              "얼굴 인식은 느려서 fps 를 크게 떨어뜨린다")
+    parser.add_argument("--webapp", action="store_true",
+                        help="모바일 뷰어용 웹서버를 켠다. 폰 브라우저로 "
+                             "http://<맥북IP>:포트 접속 시 스켈레톤/타일이 보인다")
+    parser.add_argument("--webapp-port", type=int, default=8000,
+                        help="웹서버 포트 (기본 8000)")
     return parser.parse_args()
 
 
@@ -110,6 +115,15 @@ def main():
     prob_threshold = profile.prob_threshold
     persistence = profile.persistence
 
+    # 모바일 뷰어 웹서버(선택). 낙상 로직과 무관한 브로드캐스트 채널이며,
+    # 실패해도 파이프라인은 그대로 돌도록 예외를 밖으로 던지지 않는다.
+    webapp = None
+    if args.webapp:
+        import webapp_server
+        webapp = webapp_server.WebAppServer(port=args.webapp_port)
+        if not webapp.start():
+            webapp = None
+
     try:
         source = pose_source.PoseSource(
             video_source=video_source,
@@ -148,6 +162,10 @@ def main():
                 window.clear()
                 consecutive_risk_frames = 0
 
+            if webapp is not None:
+                webapp.push_pose(frame.landmarks, frame.image.shape,
+                                 frame.risk_score, consecutive_risk_frames, persistence)
+
             if (consecutive_risk_frames >= persistence
                     and (now - last_risk_time) > RISK_COOLDOWN):
                 direction_deg, R, lean_ratio = tiles.resolve_direction(window)
@@ -161,6 +179,8 @@ def main():
                       f"-> 타일 {sorted(fired)} ({len(fired)}장) ack={ack}")
                 log_event(profile.name, frame.face_name, frame.risk_score,
                           direction_deg, lean_ratio, R, fired, ack)
+                if webapp is not None:
+                    webapp.push_fall(sorted(fired), rows, cols, direction_deg)
 
                 active_tiles = fired
                 last_risk_time = now
@@ -170,6 +190,8 @@ def main():
             if reset_pending and (now - last_risk_time) > RESET_DELAY:
                 if not args.no_serial:
                     controller.reset()
+                if webapp is not None:
+                    webapp.push_reset()
                 reset_pending = False
                 active_tiles = set()
 
@@ -208,6 +230,8 @@ def main():
         source.release()
         cv2.destroyAllWindows()
         controller.close()
+        if webapp is not None:
+            webapp.stop()
     return 0
 
 
