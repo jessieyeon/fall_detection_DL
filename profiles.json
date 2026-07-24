@@ -1,0 +1,18 @@
+{
+  "human": {
+    "persistence": 3,
+    "prob_threshold": 0.70,
+    "tau_R": 0.85,
+    "tau_R_strict": 0.95,
+    "tau_lean": 0.15,
+    "window": 8
+  },
+  "doll": {
+    "persistence": 2,
+    "prob_threshold": 0.60,
+    "tau_R": 0.80,
+    "tau_R_strict": 0.93,
+    "tau_lean": 0.12,
+    "window": 6
+  }
+}
