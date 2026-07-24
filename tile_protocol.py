@@ -17,6 +17,7 @@ BAUD = 115200
 SERIAL_READ_TIMEOUT = 0.05   # readline() 한 번이 블로킹되는 최대 시간(초)
 RESPONSE_TIMEOUT = 0.2       # 명령 하나에 대한 응답을 기다리는 최대 시간(초)
 POLL_INTERVAL = 0.01         # 대기 루프가 CPU 를 독점하지 않도록 잠깐 양보하는 시간(초)
+READY_GRACE = 0.3            # PING 을 찌르기 전에 부팅 READY 를 먼저 기다려보는 시간(초)
 
 
 def _default_serial_factory(port, baud, read_timeout):
@@ -41,11 +42,19 @@ class TileController:
     # --- 연결 ---
 
     def connect(self, port, baud=BAUD, ready_timeout=5.0):
-        """포트를 열고 READY 를 기다린다. 사용 가능한 서보 개수를 반환한다.
+        """포트를 열고 연결을 확인한다. 사용 가능한 서보 개수를 반환한다.
 
-        대부분의 아두이노는 시리얼 포트가 열릴 때 리셋되고 setup() 에는
-        delay(500) 이 있다. 핸드셰이크 없이 바로 명령을 보내면 부팅 중에
-        삼켜진다.
+        두 부류의 보드를 모두 지원한다:
+          - 클래식 UNO(AVR): 포트를 열면 DTR 로 자동 리셋되어 setup() 이 다시
+            돌고 부팅 끝에 "READY <n>" 을 보낸다. 이 줄로 서보 개수까지 알 수 있다.
+          - UNO R4 WiFi 등 네이티브 USB 보드: 포트를 열어도 리셋되지 않는다.
+            부팅 때 한 번 보낸 READY 는 이미 지나가버려 못 받는다. 그래서 READY
+            만 기다리면 영원히 못 붙는다. 이 경우 PING 을 능동적으로 찔러
+            "OK PING" 응답으로 살아있음을 확인한다(서보 개수는 알 수 없어 0).
+
+        따라서 READY 를 수동적으로 기다리는 동시에, 주기적으로 PING 을 보내
+        어느 쪽 응답이 먼저 오든 그것으로 연결을 확정한다. 연결 성공 여부는
+        반환값이 아니라 self.simulated 로 판단해야 한다(개수 미상이면 0 을 반환).
         """
         self._close_serial()  # 재연결 시 이전 핸들이 열린 채로 새지 않도록 먼저 닫는다
 
@@ -65,7 +74,20 @@ class TileController:
             pass
 
         deadline = time.monotonic() + ready_timeout
+        # 리셋되는 보드가 스스로 보내는 READY 를 먼저 받을 기회를 준다. 그 유예
+        # 안에 READY 가 오면 PING 은 한 번도 안 나가고, 서보 개수까지 확보한다.
+        next_ping = time.monotonic() + READY_GRACE
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if now >= next_ping:
+                # 리셋되지 않는 보드를 위해 능동적으로 찔러본다. 리셋되는 보드는
+                # 부팅 중이라 이 PING 을 흘려보내지만 곧 READY 를 보내온다.
+                try:
+                    self._serial.write(b"PING\n")
+                except Exception:
+                    pass
+                next_ping = now + 0.5
+
             line = self._read_line()
             if line is None:
                 time.sleep(POLL_INTERVAL)  # 아직 못 읽었으면 잠깐 쉬었다가 다시 시도
@@ -86,8 +108,16 @@ class TileController:
                 self.simulated = False
                 print(f"[타일] 아두이노 연결됨 - 서보 {self.servo_count}개")
                 return self.servo_count
+            if line == "OK PING":
+                # 네이티브 USB 보드: 리셋이 없어 READY 는 못 받았지만 살아있다.
+                # 서보 개수는 알 수 없으므로 0(미상)으로 둔다 - main 은 0이면
+                # 개수 불일치 경고를 건너뛴다.
+                self.servo_count = 0
+                self.simulated = False
+                print("[타일] 아두이노 연결됨 (PING 응답 확인, 서보 개수 미상)")
+                return self.servo_count
 
-        print(f"[타일] 경고: {port} 에서 READY 응답이 오지 않았습니다 - 시뮬레이션 모드.")
+        print(f"[타일] 경고: {port} 에서 READY/PING 응답이 오지 않았습니다 - 시뮬레이션 모드.")
         self._close_serial()
         return self._fall_back_to_simulation()
 

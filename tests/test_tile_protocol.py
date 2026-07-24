@@ -28,6 +28,20 @@ class FakeSerial:
         self.close_count += 1
 
 
+class ResetlessFakeSerial(FakeSerial):
+    """포트를 열어도 리셋되지 않는 네이티브 USB 보드(예: UNO R4 WiFi)를 흉내낸다.
+
+    부팅 시의 READY 를 (이미 지나가버려서) 보내지 않는다. 대신 PING 을 받았을
+    때만 OK PING 으로 답한다. connect() 가 READY 만 기다리면 영원히 못 붙고,
+    PING 을 능동적으로 찔러야만 연결이 된다.
+    """
+
+    def write(self, data):
+        super().write(data)
+        if data == b"PING\n":
+            self._pending.append("OK PING")
+
+
 def make_controller(responses):
     fake = FakeSerial(responses)
     controller = tile_protocol.TileController(
@@ -53,6 +67,17 @@ def test_connect_without_ready_falls_back_to_simulation():
     assert controller.connect("/dev/fake", ready_timeout=0.2) == 0
     assert controller.simulated is True
     assert fake.closed is True
+
+
+def test_connect_probes_with_ping_when_board_sends_no_ready():
+    # UNO R4 WiFi 등 네이티브 USB 보드는 포트를 열어도 리셋되지 않아 부팅 READY 를
+    # 놓친다. connect() 는 PING 을 능동적으로 보내 OK PING 으로도 연결을 확인해야 한다.
+    fake = ResetlessFakeSerial([])
+    controller = tile_protocol.TileController(
+        serial_factory=lambda port, baud, read_timeout: fake)
+    controller.connect("/dev/fake", ready_timeout=1.0)
+    assert controller.simulated is False
+    assert b"PING\n" in fake.written
 
 
 def test_connect_with_no_port_is_simulation_mode():
