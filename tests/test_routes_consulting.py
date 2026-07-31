@@ -91,3 +91,13 @@ def test_analyze_requires_login(env):
     r = TestClient(env).post("/api/consulting/analyze",
                              files={"file": ("c.mp4", b"x", "video/mp4")})
     assert r.status_code == 401
+
+
+def test_safe_upload_path_strips_traversal():
+    import os
+    from webservice import routes_consulting as rc
+    p = rc._safe_upload_path("../../../etc/passwd")
+    # the resolved path must stay directly inside the uploads dir
+    assert os.path.dirname(os.path.abspath(p)) == os.path.abspath(rc._UPLOAD_DIR)
+    assert "etc" not in os.path.basename(p) or os.path.basename(p).endswith("passwd")
+    assert ".." not in p.split(rc._UPLOAD_DIR)[-1]

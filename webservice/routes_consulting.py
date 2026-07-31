@@ -18,6 +18,13 @@ _UPLOAD_DIR = os.path.join(_BASE, "consulting", "uploads")
 _REPORT_DIR = os.path.join(_BASE, "consulting", "reports")
 
 
+def _safe_upload_path(filename):
+    # file.filename is attacker-controlled; strip any directory components so
+    # the upload can never escape _UPLOAD_DIR.
+    name = f"{uuid.uuid4().hex}_{os.path.basename(filename)}"
+    return os.path.join(_UPLOAD_DIR, name)
+
+
 def _analyze(video_path):
     # 테스트가 monkeypatch하는 훅 — 실제 경로는 지연 임포트한 YOLO를 쓴다.
     from webservice.consulting.analyze import analyze_video
@@ -39,8 +46,7 @@ def _can_access(conn, user, owner_id):
 async def analyze(user=Depends(current_user), file: UploadFile = File(...)):
     os.makedirs(_UPLOAD_DIR, exist_ok=True)
     os.makedirs(_REPORT_DIR, exist_ok=True)
-    video_name = f"{uuid.uuid4().hex}_{file.filename}"
-    video_path = os.path.join(_UPLOAD_DIR, video_name)
+    video_path = _safe_upload_path(file.filename)
     with open(video_path, "wb") as f:
         f.write(await file.read())
 
