@@ -30,3 +30,16 @@ export const guardianList = () => req("/api/guardian/list");
 export const hospitals = () => req("/api/home/hospitals");
 export const floorplanUrl = (apartment) =>
   `/api/home/floorplan?apartment=${encodeURIComponent(apartment)}`;
+
+// 컨설팅
+export const analyzeVideo = (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return fetch("/api/consulting/analyze", {
+    method: "POST", credentials: "include", body: form,
+  }).then((r) => { if (!r.ok) throw new Error("업로드 실패"); return r.json(); });
+};
+export const consultingStatus = (jobId) => req(`/api/consulting/status/${jobId}`);
+export const consultingReports = () => req("/api/consulting/reports");
+export const consultingReport = (rid) => req(`/api/consulting/report/${rid}`);
+export const consultingImageUrl = (rid) => `/api/consulting/report/${rid}/image`;
