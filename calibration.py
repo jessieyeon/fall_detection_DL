@@ -37,17 +37,6 @@ def load_tile_grid(path=CALIBRATION_FILE):
     }
 
 
-def pixel_to_tile(foot_xy, tile_grid):
-    """발 위치 픽셀 좌표를 (row, col, tile_index) 로 변환한다."""
-    px = np.array([[foot_xy]], dtype=np.float32)
-    u, v = cv2.perspectiveTransform(px, tile_grid["homography"])[0][0]
-    u = min(max(u, 0.0), 0.999)
-    v = min(max(v, 0.0), 0.999)
-    col = int(u * tile_grid["cols"])
-    row = int(v * tile_grid["rows"])
-    return row, col, row * tile_grid["cols"] + col
-
-
 def draw_tile_grid(frame, tile_grid, active_tiles=None):
     """프레임 위에 격자를 그리고 active_tiles 를 붉게 강조한다."""
     rows, cols = tile_grid["rows"], tile_grid["cols"]

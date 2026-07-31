@@ -185,6 +185,9 @@ def main():
                 active_tiles = fired
                 last_risk_time = now
                 consecutive_risk_frames = 0
+                # 발동 후에도 쓰러진 상태가 이어지면 window 에 발동 이전의 낡은
+                # 방향 표본이 남아 다음 발동 판정에 샌다 - 스트릭과 함께 비운다.
+                window.clear()
                 reset_pending = True
 
             if reset_pending and (now - last_risk_time) > RESET_DELAY:

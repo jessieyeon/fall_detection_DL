@@ -34,7 +34,10 @@ def direction_from_motion(vx, vy, camera_yaw_deg=0.0):
     if math.hypot(vx, vy) < MOTION_EPS:
         return 0.0
     # atan2(vx, -vy): 화면 위(-vy)를 0도로, 시계방향으로 우(+vx)=90도.
-    return (math.degrees(math.atan2(vx, -vy)) - camera_yaw_deg) % 360.0
+    deg = (math.degrees(math.atan2(vx, -vy)) - camera_yaw_deg) % 360.0
+    # 아주 작은 음수 부동소수점은 % 360.0 이 정확히 360.0 으로 올릴 수 있다
+    # (예: -1e-14 % 360.0 == 360.0). resolve_direction 과 같은 가드를 둔다.
+    return 0.0 if deg >= 360.0 else deg
 
 
 def lean_from_tilt(tilt_deg):

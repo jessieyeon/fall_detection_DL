@@ -58,7 +58,7 @@ def main():
 
     persistence = 3
     fps = 20.0
-    tile_cycle = [1, COLS - 1, ROWS * COLS - 1, (ROWS - 1) * COLS]  # 여러 위치 번갈아
+    tile_cycle = list(range(ROWS * COLS))  # 전체 타일을 순서대로 번갈아
     cycle_i = 0
     t = 0.0
     try:
