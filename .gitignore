@@ -9,3 +9,5 @@ test_videos/*
 docs/superpowers/
 fall_risk_log.old.csv
 webservice/daon.db
+webservice/frontend/node_modules/
+webservice/frontend/dist/
