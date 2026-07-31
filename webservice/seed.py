@@ -17,6 +17,10 @@ def seed_demo(path=db.DB_PATH):
                 "SELECT 1 FROM users WHERE email = ?", (email,)).fetchone()
             if exists is None:
                 auth.create_user(conn, email, pw, role, name)
+        conn.execute(
+            "UPDATE users SET address = ?, apartment_name = ? WHERE email = ?",
+            ("서울특별시 서대문구 연세로 50", "다온아파트", "senior@daon.com"))
+        conn.commit()
     finally:
         conn.close()
 

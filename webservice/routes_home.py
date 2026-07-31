@@ -53,5 +53,7 @@ def nearby(user=Depends(current_user)):
         return hospitals.nearby_hospitals(coords[0], coords[1], client=client)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    except httpx.HTTPStatusError:
+        raise HTTPException(status_code=502, detail="병원 정보를 불러오지 못했습니다")
     finally:
         client.close()

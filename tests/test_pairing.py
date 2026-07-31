@@ -32,6 +32,18 @@ def test_invalid_code_raises(tmp_path):
         pairing.redeem_code(conn, "000000", gid)
 
 
+def test_expired_code_raises(tmp_path):
+    from datetime import datetime, timedelta
+    conn, sid, gid = _setup(tmp_path)
+    past = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    conn.execute("INSERT INTO pairing_codes (code, senior_id, expires_at) VALUES (?, ?, ?)",
+                 ("123456", sid, past))
+    conn.commit()
+    with pytest.raises(ValueError):
+        pairing.redeem_code(conn, "123456", gid)
+    assert conn.execute("SELECT 1 FROM pairing_codes WHERE code = '123456'").fetchone() is None
+
+
 def test_regenerate_replaces_old_code(tmp_path):
     conn, sid, gid = _setup(tmp_path)
     old = pairing.generate_code(conn, sid)

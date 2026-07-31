@@ -15,7 +15,8 @@ class LoginBody(BaseModel):
 
 def _public(row):
     return {"id": row["id"], "email": row["email"],
-            "role": row["role"], "name": row["name"]}
+            "role": row["role"], "name": row["name"],
+            "apartment_name": row["apartment_name"]}
 
 
 def current_user(request: Request):

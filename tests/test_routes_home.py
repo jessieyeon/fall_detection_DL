@@ -47,6 +47,14 @@ def test_hospitals_uses_address(client, monkeypatch):
     assert out[0]["name"] == "다온병원"
 
 
+def test_hospitals_upstream_error_502(client, monkeypatch):
+    monkeypatch.setenv("KAKAO_REST_KEY", "k")
+    handler = lambda request: httpx.Response(401, json={"msg": "unauthorized"})
+    monkeypatch.setattr("webservice.routes_home._client_factory",
+                        lambda: httpx.Client(transport=httpx.MockTransport(handler)))
+    assert client.get("/api/home/hospitals").status_code == 502
+
+
 def test_hospitals_requires_login(tmp_path, monkeypatch):
     dbfile = os.path.join(tmp_path, "t2.db")
     monkeypatch.setattr("webservice.db.DB_PATH", dbfile)
