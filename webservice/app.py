@@ -7,6 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from webservice import db
 from webservice.routes_auth import router as auth_router
+from webservice.routes_survey import router as survey_router
 
 app = FastAPI(title="다온 낙상 케어")
 app.add_middleware(
@@ -14,6 +15,7 @@ app.add_middleware(
     secret_key=os.environ.get("DAON_SECRET", "dev-demo-secret-change-me"),
 )
 app.include_router(auth_router)
+app.include_router(survey_router)
 
 
 @app.on_event("startup")
