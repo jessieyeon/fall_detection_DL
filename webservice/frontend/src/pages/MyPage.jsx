@@ -17,6 +17,7 @@ export default function MyPage({ user, onLogout }) {
       <h1>마이페이지</h1>
       <p>{user.name}님 ({user.role === "senior" ? "어르신" : "보호자"})</p>
       <button onClick={doLogout}>로그아웃</button>
+      <p><Link to="/live">실시간 중계 →</Link></p>
       {user.role === "senior" && (
         <p><Link to="/consulting">컨설팅 (영상 분석) →</Link></p>
       )}

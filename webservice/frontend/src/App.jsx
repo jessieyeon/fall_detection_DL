@@ -4,6 +4,7 @@ import { me } from "./api.js";
 import Login from "./pages/Login.jsx";
 import MyPage from "./pages/MyPage.jsx";
 import Consulting from "./pages/Consulting.jsx";
+import Live from "./pages/Live.jsx";
 
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined=확인중, null=비로그인
@@ -25,6 +26,10 @@ export default function App() {
       <Route
         path="/consulting"
         element={user ? <Consulting /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/live"
+        element={user ? <Live /> : <Navigate to="/login" replace />}
       />
       <Route path="*" element={<Navigate to={user ? "/mypage" : "/login"} replace />} />
     </Routes>
