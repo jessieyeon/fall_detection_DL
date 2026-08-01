@@ -46,3 +46,10 @@ def test_event_bad_type_400(app):
     r = client.post("/api/live/event", headers={"X-Live-Token": "daon-live"},
                     json={"type": "bogus"})
     assert r.status_code == 400
+
+
+def test_event_missing_fields_400(app):
+    client = TestClient(app)
+    r = client.post("/api/live/event", headers={"X-Live-Token": "daon-live"},
+                    json={"type": "fall", "tiles": [1]})   # rows/cols missing
+    assert r.status_code == 400

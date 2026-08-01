@@ -15,17 +15,28 @@ export default function Live() {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onmessage = (e) => {
-      const m = JSON.parse(e.data);
-      const s = stateRef.current;
-      if (m.type === "pose") { s.landmarks = m.landmarks; s.risk = m.risk; s.prog = m.prog; }
-      else if (m.type === "fall") { s.tiles = m.tiles; s.rows = m.rows; s.cols = m.cols; }
-      else if (m.type === "reset") { s.tiles = []; }
+    let ws;
+    let retryTimer;
+    let mounted = true;
+
+    const connect = () => {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/ws/live`);
+      ws.onopen = () => { if (mounted) setConnected(true); };
+      ws.onclose = () => {
+        if (!mounted) return;
+        setConnected(false);
+        retryTimer = setTimeout(connect, 1500);   // 끊기면 재연결
+      };
+      ws.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        const s = stateRef.current;
+        if (m.type === "pose") { s.landmarks = m.landmarks; s.risk = m.risk; s.prog = m.prog; }
+        else if (m.type === "fall") { s.tiles = m.tiles || []; s.rows = m.rows || s.rows; s.cols = m.cols || s.cols; }
+        else if (m.type === "reset") { s.tiles = []; }
+      };
     };
+    connect();
 
     let raf;
     const draw = () => {
@@ -73,7 +84,12 @@ export default function Live() {
     };
     draw();
 
-    return () => { cancelAnimationFrame(raf); ws.close(); };
+    return () => {
+      mounted = false;
+      clearTimeout(retryTimer);
+      cancelAnimationFrame(raf);
+      if (ws) ws.close();
+    };
   }, []);
 
   return (

@@ -10,6 +10,7 @@ router = APIRouter()
 manager = live.ConnectionManager()
 
 _VALID_TYPES = {"pose", "fall", "reset"}
+_REQUIRED = {"pose": ("landmarks",), "fall": ("tiles", "rows", "cols"), "reset": ()}
 
 
 def _ingest_token():
@@ -39,5 +40,8 @@ async def live_event(message: dict, x_live_token: str = Header(default="")):
         raise HTTPException(status_code=401, detail="invalid ingest token")
     if message.get("type") not in _VALID_TYPES:
         raise HTTPException(status_code=400, detail="unknown event type")
+    missing = [k for k in _REQUIRED[message["type"]] if k not in message]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"missing fields: {missing}")
     await manager.broadcast(message)
     return {"delivered": len(manager._clients)}
