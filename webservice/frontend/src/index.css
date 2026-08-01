@@ -1,0 +1,11 @@
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: "Atkinson Hyperlegible", system-ui, -apple-system, sans-serif;
+  background: #f8f9ff;
+  color: #151c25;
+  -webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, select { font-family: inherit; }
+a { color: inherit; }
