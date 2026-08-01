@@ -49,6 +49,10 @@ def parse_args():
                              "http://<맥북IP>:포트 접속 시 스켈레톤/타일이 보인다")
     parser.add_argument("--webapp-port", type=int, default=8000,
                         help="웹서버 포트 (기본 8000)")
+    parser.add_argument("--live-url", default=None,
+                        help="다온 웹플랫폼 실시간 중계 URL (예: http://localhost:8000). "
+                             "지정하면 감지 결과를 플랫폼으로 중계한다(--webapp 대체). "
+                             "인제스트 토큰은 LIVE_INGEST_TOKEN 환경변수(기본 daon-live)")
     return parser.parse_args()
 
 
@@ -118,7 +122,15 @@ def main():
     # 모바일 뷰어 웹서버(선택). 낙상 로직과 무관한 브로드캐스트 채널이며,
     # 실패해도 파이프라인은 그대로 돌도록 예외를 밖으로 던지지 않는다.
     webapp = None
-    if args.webapp:
+    if args.live_url:
+        # 다온 웹플랫폼으로 중계. WebAppServer 와 같은 인터페이스라 아래 루프의
+        # push_pose/push_fall/push_reset 호출은 그대로 동작한다.
+        from webservice import live_bridge
+        webapp = live_bridge.LiveBridge(args.live_url)
+        if not webapp.start():
+            webapp.stop()
+            webapp = None
+    elif args.webapp:
         import webapp_server
         webapp = webapp_server.WebAppServer(port=args.webapp_port)
         if not webapp.start():
