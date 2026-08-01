@@ -11,6 +11,7 @@ from webservice.routes_survey import router as survey_router
 from webservice.routes_guardian import router as guardian_router
 from webservice.routes_home import router as home_router
 from webservice.routes_consulting import router as consulting_router
+from webservice.routes_live import router as live_router
 
 app = FastAPI(title="다온 낙상 케어")
 app.add_middleware(
@@ -22,6 +23,7 @@ app.include_router(survey_router)
 app.include_router(guardian_router)
 app.include_router(home_router)
 app.include_router(consulting_router)
+app.include_router(live_router)
 
 
 @app.on_event("startup")
