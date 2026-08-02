@@ -56,10 +56,11 @@ async def analyze(user=Depends(current_user), file: UploadFile = File(...),
 
     def job():
         hm, first = _analyze(video_path)
-        report = rules.analyze_report(hm)
+        report = rules.analyze_report(hm)          # 기본 3×3 격자
         rid_name = uuid.uuid4().hex
         png_path = os.path.join(_REPORT_DIR, f"{rid_name}.png")
-        heatmap.render_heatmap_png(hm, png_path, background=first)
+        # 방 위에 가장 위험한 구역만 빨간 박스로 표시(그라디언트보다 명확).
+        heatmap.render_hazard_boxes(first, report["findings"][:1], 3, 3, png_path)
         conn = db.connect()
         try:
             cur = conn.execute(

@@ -23,3 +23,16 @@ def test_render_writes_valid_image(tmp_path):
     heatmap.render_heatmap_png(hm, out)
     img = cv2.imread(out)
     assert img is not None and img.shape[:2] == (40, 40)
+
+
+def test_hazard_boxes_marks_cell_red(tmp_path):
+    import cv2
+    frame = np.zeros((30, 30, 3), dtype=np.uint8)          # 검은 방
+    findings = [{"cell": [0, 0], "level": "높음"}]           # 좌상단 셀이 위험
+    out = os.path.join(tmp_path, "box.png")
+    heatmap.render_hazard_boxes(frame, findings, 3, 3, out)
+    img = cv2.imread(out)
+    assert img is not None and img.shape == (30, 30, 3)
+    # 좌상단(위험 셀)에는 빨강(BGR R>100)이 칠해지고, 우하단은 그대로 검정
+    assert img[3, 3][2] > 100
+    assert img[27, 27].sum() < 30

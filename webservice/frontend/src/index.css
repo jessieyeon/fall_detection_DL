@@ -1,7 +1,9 @@
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body {
-  font-family: "Atkinson Hyperlegible", system-ui, -apple-system, sans-serif;
+  /* 한글+영문을 한 폰트로 통일(Atkinson 은 한글 글리프가 없어 섞여 보였음) */
+  font-family: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR",
+    system-ui, -apple-system, sans-serif;
   background: #f8f9ff;
   color: #151c25;
   -webkit-font-smoothing: antialiased;

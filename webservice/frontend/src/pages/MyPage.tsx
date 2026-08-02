@@ -45,7 +45,8 @@ export default function MyPage({ user, onLogout }: { user: User; onLogout: () =>
 
 function SeniorHome({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [latest, setLatest] = useState<SurveyLatest | null>(null);
-  const [questions, setQuestions] = useState<Question[] | null>(null);
+  const [questions, setQuestions] = useState<Question[] | null>(null); // 진입 시 미리 불러온 캐시
+  const [taking, setTaking] = useState(false);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [guardians, setGuardians] = useState<Person[]>([]);
   const [code, setCode] = useState("");
@@ -57,17 +58,18 @@ function SeniorHome({ user, onLogout }: { user: User; onLogout: () => void }) {
   useEffect(() => {
     latestSurvey().then(setLatest).catch(() => {});
     guardianList().then(setGuardians).catch(() => {});
+    // 설문 문항을 미리 받아둔다 → '자가진단 시작' 클릭 시 즉시 열림(로딩 대기 없음).
+    surveyQuestions().then((q) => {
+      setQuestions(q.questions);
+      setAnswers(Object.fromEntries(q.questions.map((x) => [x.id, 0])));
+    }).catch(() => {});
   }, []);
 
-  async function startSurvey() {
-    const q = await surveyQuestions();
-    setQuestions(q.questions);
-    setAnswers(Object.fromEntries(q.questions.map((x) => [x.id, 0])));
-  }
+  function startSurvey() { setTaking(true); }
   async function submit() {
     const res = await submitSurvey(answers);
     setLatest({ score: res.score, risk_level: res.risk_level, created_at: new Date().toISOString() });
-    setQuestions(null);
+    setTaking(false);
   }
 
   // 시연 장소 주소가 아직 없어 GPS 좌표로 근처 병원을 찾는다.
@@ -91,7 +93,7 @@ function SeniorHome({ user, onLogout }: { user: User; onLogout: () => void }) {
       </Section>
 
       <Section title="안전 자가진단">
-        {questions ? (
+        {taking ? (questions ? (
           <Card style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {questions.map((q) => (
               <div key={q.id} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -110,6 +112,10 @@ function SeniorHome({ user, onLogout }: { user: User; onLogout: () => void }) {
             <Button big full onClick={submit}>제출하기</Button>
           </Card>
         ) : (
+          <Card style={{ padding: 24 }}>
+            <p style={{ margin: 0, color: color.gray }}>설문을 불러오는 중…</p>
+          </Card>
+        )) : (
           <Card style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <p style={{ margin: 0, fontSize: 20, lineHeight: 1.6 }}>
               {latest

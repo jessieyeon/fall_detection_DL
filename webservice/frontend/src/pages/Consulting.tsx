@@ -47,9 +47,7 @@ export default function Consulting() {
     }
   }
 
-  // 같은 권고문이 중복으로 나오면 하나만 보여준다.
-  const fixes = active ? active.findings.filter((f, i, a) => a.findIndex((g) => g.recommendation === f.recommendation) === i) : [];
-  const top = active?.findings[0];
+  const top = active?.findings[0];   // 가장 위험한 구역 하나만 보여준다
 
   return (
     <AppShell active="consult">
@@ -112,12 +110,12 @@ export default function Consulting() {
                 <div style={{ fontSize: 15, fontWeight: 700 }}>왜 위험한가요?</div>
                 <p style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.6 }}>{active.summary}</p>
               </div>
-              {fixes.map((f, i) => (
-                <div key={i} style={{ background: color.blue2, padding: 16, ...edge(2) }}>
+              {top && (
+                <div style={{ background: color.blue2, padding: 16, ...edge(2) }}>
                   <div style={{ fontSize: 15, fontWeight: 700 }}>권장 개선 방법</div>
-                  <p style={{ margin: "6px 0 0", fontSize: 18, lineHeight: 1.6 }}>{f.recommendation}</p>
+                  <p style={{ margin: "6px 0 0", fontSize: 18, lineHeight: 1.6 }}>{top.recommendation}</p>
                 </div>
-              ))}
+              )}
               <Button variant="outline" full>확인했어요</Button>
             </div>
           </Card>

@@ -27,3 +27,30 @@ def render_heatmap_png(heatmap, out_path, background=None):
     if background is not None:
         color = cv2.addWeighted(background, 0.5, color, 0.5, 0)
     cv2.imwrite(out_path, color)
+
+
+def render_hazard_boxes(frame, findings, rows, cols, out_path):
+    """캡처된 방 프레임 위에 위험 구역(격자 셀)을 반투명 빨간 박스 + 굵은 테두리로 표시.
+
+    JET 그라디언트보다 '어느 방 구역이 위험한지'가 명확하다. findings 의 cell=[r,c] 를
+    rows×cols 격자 셀로 환산해 그린다. 색은 위험 등급에 따른다(BGR).
+    """
+    img = frame.copy()
+    h, w = img.shape[:2]
+    ch, cw = h // rows, w // cols
+    seen = set()
+    for f in findings:
+        cell = tuple(f["cell"])
+        if cell in seen:
+            continue
+        seen.add(cell)
+        r, c = cell
+        x1, y1 = int(c * cw), int(r * ch)
+        x2, y2 = int(x1 + cw), int(y1 + ch)
+        col = (0, 0, 255) if f["level"] == "높음" else \
+              (0, 140, 255) if f["level"] == "보통" else (170, 170, 170)
+        overlay = img.copy()
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), col, -1)
+        cv2.addWeighted(overlay, 0.25, img, 0.75, 0, dst=img)  # 반투명 채움
+        cv2.rectangle(img, (x1, y1), (x2, y2), col, 4)          # 굵은 테두리
+    cv2.imwrite(out_path, img)
