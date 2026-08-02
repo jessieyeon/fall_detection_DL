@@ -1,28 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import { color, edge } from "../theme";
-import { Wifi, Mic, Phone } from "../ui/icons";
+import { Wifi, Phone } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 
-// MediaPipe Pose 33 관절 중 알아볼 만한 최소 연결선
 const CONNECTIONS: [number, number][] = [
   [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
   [11, 23], [12, 24], [23, 24],
   [23, 25], [25, 27], [24, 26], [26, 28],
 ];
-
+const LOCATIONS = ["거실", "침실", "주방", "화장실"];
 type LiveState = { landmarks: number[][] | null; tiles: number[]; rows: number; cols: number };
 
 export default function Live() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<LiveState>({ landmarks: null, tiles: [], rows: 2, cols: 2 });
   const lastPose = useRef<number | null>(null);
-  const [connected, setConnected] = useState(false);
+  const [location, setLocation] = useState("거실");
+  const [alerting, setAlerting] = useState(false);
   const [, setTick] = useState(0);
 
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 5000); // 상대시간 갱신
+    const id = setInterval(() => setTick((t) => t + 1), 2000);
     return () => clearInterval(id);
   }, []);
 
@@ -30,16 +30,10 @@ export default function Live() {
     let ws: WebSocket | undefined;
     let retryTimer: ReturnType<typeof setTimeout>;
     let mounted = true;
-
     const connect = () => {
-      const proto = location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${location.host}/ws/live`);
-      ws.onopen = () => { if (mounted) setConnected(true); };
-      ws.onclose = () => {
-        if (!mounted) return;
-        setConnected(false);
-        retryTimer = setTimeout(connect, 1500);
-      };
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${window.location.host}/ws/live`);
+      ws.onclose = () => { if (mounted) retryTimer = setTimeout(connect, 1500); };
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         const s = stateRef.current;
@@ -73,29 +67,49 @@ export default function Live() {
             if (pa && pb) { ctx.beginPath(); ctx.moveTo(pa[0] * W, pa[1] * H); ctx.lineTo(pb[0] * W, pb[1] * H); ctx.stroke(); }
           }
           ctx.fillStyle = "#fbbf24";
-          for (const p of s.landmarks) { ctx.beginPath(); ctx.arc(p[0] * W, p[1] * H, 3, 0, Math.PI * 2); ctx.fill(); }
+          for (const p of s.landmarks) { ctx.beginPath(); ctx.arc(p[0] * W, p[1] * H, 4, 0, Math.PI * 2); ctx.fill(); }
         }
       }
       raf = requestAnimationFrame(draw);
     };
     draw();
-
     return () => { mounted = false; clearTimeout(retryTimer); cancelAnimationFrame(raf); ws?.close(); };
   }, []);
 
+  // 최근에 포즈 데이터를 받고 있으면 ON(연결됨), 아니면 OFF.
+  const on = lastPose.current != null && Date.now() - lastPose.current < 5000;
   const activity = lastPose.current == null ? "감지 대기 중"
     : (() => { const s = Math.floor((Date.now() - lastPose.current) / 1000); return s < 60 ? `${s}초 전` : `${Math.floor(s / 60)}분 전`; })();
 
+  function callEmergency() {
+    setAlerting(true);
+    setTimeout(() => setAlerting(false), 6000);
+  }
+
   return (
-    <AppShell active="monitor" right={<Wifi size={20} color={connected ? color.ink : color.gray} />}>
-      {/* 라이브 피드(스켈레톤 캔버스) */}
+    <AppShell active="monitor">
+      {/* 위치 입력 */}
+      <div>
+        <div style={{ fontWeight: 700, marginBottom: 8 }}>위치 입력</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {LOCATIONS.map((r) => (
+            <button key={r} onClick={() => setLocation(r)}
+              style={{ padding: "8px 14px", fontSize: 16, fontWeight: 700, ...edge(2),
+                       background: location === r ? color.black : color.white, color: location === r ? color.white : color.ink }}>
+              {r}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 실시간 피드(타일 + 사람 스켈레톤). 원본 영상과 같은 4:3 비율 */}
       <div style={{ position: "relative", background: color.black, ...edge(2) }}>
-        <canvas ref={canvasRef} width={640} height={400} style={{ display: "block", width: "100%", height: "auto" }} />
+        <canvas ref={canvasRef} width={640} height={480} style={{ display: "block", width: "100%", height: "auto" }} />
         <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 8 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 6, background: color.red, color: color.white, padding: "4px 10px", fontSize: 14, fontWeight: 700, ...edge(2, color.white) }}>
-            <span style={{ width: 8, height: 8, borderRadius: 8, background: color.white }} /> LIVE
+          <span style={{ display: "flex", alignItems: "center", gap: 6, background: on ? color.red : color.gray, color: color.white, padding: "4px 10px", fontSize: 14, fontWeight: 700, ...edge(2, color.white) }}>
+            <span style={{ width: 8, height: 8, borderRadius: 8, background: color.white }} /> {on ? "ON" : "OFF"}
           </span>
-          <span style={{ background: "rgba(0,0,0,0.5)", color: color.white, padding: "4px 10px", fontSize: 14, fontWeight: 700, ...edge(2, color.white) }}>Living Room</span>
+          <span style={{ background: "rgba(0,0,0,0.5)", color: color.white, padding: "4px 10px", fontSize: 14, fontWeight: 700, ...edge(2, color.white) }}>{location}</span>
         </div>
       </div>
 
@@ -105,22 +119,23 @@ export default function Live() {
           <div style={{ color: color.gray, fontSize: 15 }}>마지막 활동 감지</div>
           <div style={{ fontWeight: 700 }}>{activity}</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, color: connected ? color.ink : color.gray }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: on ? color.ink : color.gray }}>
           <Wifi size={20} />
-          <span style={{ fontWeight: 700 }}>{connected ? "신호 양호" : "연결 대기"}</span>
+          <span style={{ fontWeight: 700 }}>{on ? "신호 양호" : "연결 대기"}</span>
         </div>
       </Card>
 
-      {/* 액션 (Speak to Home 은 데모 장식, Call Emergency 는 전화 연결) */}
-      <Button variant="outline" big full icon={<Mic />}>Speak to Home</Button>
-      <Button as="a" href="tel:119" variant="danger" big full icon={<Phone color="white" />}
-              style={{ flexDirection: "column", gap: 4, textDecoration: "none", padding: "16px 24px" }}>
-        CALL EMERGENCY
-        <span style={{ fontSize: 14, fontWeight: 700 }}>119 / 지역 응급 서비스로 연결</span>
+      {/* 긴급 전화 — 실제 발신 대신 알림 표시(MVP) */}
+      <Button variant="danger" big full icon={<Phone color="white" />} onClick={callEmergency}
+              style={{ flexDirection: "column", gap: 4 }}>
+        긴급 전화
+        <span style={{ fontSize: 14, fontWeight: 700 }}>119 / 지역 응급 서비스</span>
       </Button>
-      <p style={{ margin: 0, textAlign: "center", color: color.gray, fontSize: 15 }}>
-        카메라 없이 시험하려면 서버에서 <code>python -m webservice.live_demo</code> 실행.
-      </p>
+      {alerting && (
+        <Card bg={color.red} style={{ color: color.white, textAlign: "center", fontWeight: 700, fontSize: 18 }}>
+          🚨 긴급 전화 알림을 보냈습니다. 곧 응급 서비스로 연결됩니다.
+        </Card>
+      )}
     </AppShell>
   );
 }

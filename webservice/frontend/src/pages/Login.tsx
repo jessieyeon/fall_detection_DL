@@ -30,7 +30,7 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
       <Card style={{ width: "100%", maxWidth: 360, display: "flex", flexDirection: "column", gap: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Shield size={26} />
-          <span style={{ fontSize: 22, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3 }}>Safety Advisor</span>
+          <span style={{ fontSize: 22, fontWeight: 700, letterSpacing: 0.3 }}>다온 안전지킴이</span>
         </div>
         <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <input style={inputStyle} value={email} placeholder="이메일"

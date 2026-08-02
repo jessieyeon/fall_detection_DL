@@ -2,6 +2,7 @@
 
 import json
 import os
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -35,21 +36,26 @@ def floorplan(apartment: str = Query(...)):
 
 
 @router.get("/hospitals")
-def nearby(user=Depends(current_user)):
-    conn = db.connect()
-    try:
-        row = conn.execute("SELECT address FROM users WHERE id = ?",
-                           (user["id"],)).fetchone()
-    finally:
-        conn.close()
-    address = row["address"] if row else ""
-    if not address:
-        raise HTTPException(status_code=400, detail="주소가 등록되어 있지 않습니다")
+def nearby(user=Depends(current_user),
+           lat: Optional[float] = Query(None), lng: Optional[float] = Query(None)):
+    # lat/lng 를 주면(브라우저 GPS) 그 좌표로, 아니면 등록된 주소로 병원을 찾는다.
     client = _client_factory()
     try:
-        coords = hospitals.geocode(address, client=client)
-        if coords is None:
-            raise HTTPException(status_code=404, detail="주소를 좌표로 변환하지 못했습니다")
+        if lat is not None and lng is not None:
+            coords = (lng, lat)
+        else:
+            conn = db.connect()
+            try:
+                row = conn.execute("SELECT address FROM users WHERE id = ?",
+                                   (user["id"],)).fetchone()
+            finally:
+                conn.close()
+            address = row["address"] if row else ""
+            if not address:
+                raise HTTPException(status_code=400, detail="주소가 등록되어 있지 않습니다")
+            coords = hospitals.geocode(address, client=client)
+            if coords is None:
+                raise HTTPException(status_code=404, detail="주소를 좌표로 변환하지 못했습니다")
         return hospitals.nearby_hospitals(coords[0], coords[1], client=client)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))

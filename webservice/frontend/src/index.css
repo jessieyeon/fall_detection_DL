@@ -5,6 +5,8 @@ body {
   background: #f8f9ff;
   color: #151c25;
   -webkit-font-smoothing: antialiased;
+  word-break: keep-all;      /* 한국어: 단어 단위로 줄바꿈(단어 중간에서 안 끊김) */
+  overflow-wrap: break-word; /* 아주 긴 토큰만 강제 줄바꿈 */
 }
 button { font-family: inherit; cursor: pointer; border: none; background: none; }
 input, select { font-family: inherit; }

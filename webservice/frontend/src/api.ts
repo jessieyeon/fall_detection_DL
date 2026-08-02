@@ -4,8 +4,8 @@ export interface SurveyLatest { score: number; risk_level: string; created_at: s
 export interface Question { id: string; text: string; options: { label: string; points: number }[] }
 export interface Questionnaire { questions: Question[]; thresholds: Record<string, number> }
 export interface Finding { zone: string; cell: [number, number]; score: number; level: string; recommendation: string }
-export interface Report { id: number; summary: string; findings: Finding[]; created_at: string }
-export interface ReportRow { id: number; user_id: number; created_at: string; summary: string }
+export interface Report { id: number; summary: string; findings: Finding[]; location: string; created_at: string }
+export interface ReportRow { id: number; user_id: number; created_at: string; location: string; summary: string }
 export interface Hospital { name: string; address: string; phone: string; distance_m: number; url: string }
 export interface Ward { id: number; name: string; risk_level: string | null }
 export interface Person { id: number; name: string }
@@ -43,14 +43,16 @@ export const wards = () => req<Ward[]>("/api/guardian/wards");
 export const guardianList = () => req<Person[]>("/api/guardian/list");
 
 // 홈
-export const hospitals = () => req<Hospital[]>("/api/home/hospitals");
+export const hospitals = (coords?: { lat: number; lng: number }) =>
+  req<Hospital[]>(`/api/home/hospitals${coords ? `?lat=${coords.lat}&lng=${coords.lng}` : ""}`);
 export const floorplanUrl = (apartment: string) =>
   `/api/home/floorplan?apartment=${encodeURIComponent(apartment)}`;
 
 // 컨설팅
-export const analyzeVideo = (file: File) => {
+export const analyzeVideo = (file: File, location = "") => {
   const form = new FormData();
   form.append("file", file);
+  form.append("location", location);
   return fetch("/api/consulting/analyze", { method: "POST", credentials: "include", body: form })
     .then((r) => { if (!r.ok) throw new Error("업로드 실패"); return r.json() as Promise<{ job_id: string }>; });
 };

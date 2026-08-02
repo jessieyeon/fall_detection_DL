@@ -4,7 +4,7 @@ import json
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from webservice import db
@@ -43,7 +43,8 @@ def _can_access(conn, user, owner_id):
 
 
 @router.post("/analyze")
-async def analyze(user=Depends(current_user), file: UploadFile = File(...)):
+async def analyze(user=Depends(current_user), file: UploadFile = File(...),
+                  location: str = Form("")):
     os.makedirs(_UPLOAD_DIR, exist_ok=True)
     os.makedirs(_REPORT_DIR, exist_ok=True)
     video_path = _safe_upload_path(file.filename)
@@ -51,6 +52,7 @@ async def analyze(user=Depends(current_user), file: UploadFile = File(...)):
         f.write(await file.read())
 
     user_id = user["id"]
+    video_ref = location or file.filename   # 촬영 위치(거실 등)를 저장, 없으면 파일명
 
     def job():
         hm, first = _analyze(video_path)
@@ -63,7 +65,7 @@ async def analyze(user=Depends(current_user), file: UploadFile = File(...)):
             cur = conn.execute(
                 "INSERT INTO reports (user_id, video_ref, heatmap_path, findings_json) "
                 "VALUES (?, ?, ?, ?)",
-                (user_id, file.filename, png_path,
+                (user_id, video_ref, png_path,
                  json.dumps(report, ensure_ascii=False)))
             conn.commit()
             return cur.lastrowid
@@ -89,19 +91,19 @@ def reports(user=Depends(current_user)):
     try:
         if user["role"] == "guardian":
             rows = conn.execute(
-                "SELECT r.id, r.user_id, r.created_at, r.findings_json "
+                "SELECT r.id, r.user_id, r.created_at, r.video_ref, r.findings_json "
                 "FROM reports r JOIN guardian_links gl ON gl.senior_id = r.user_id "
                 "WHERE gl.guardian_id = ? ORDER BY r.id DESC", (user["id"],)).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, user_id, created_at, findings_json FROM reports "
+                "SELECT id, user_id, created_at, video_ref, findings_json FROM reports "
                 "WHERE user_id = ? ORDER BY id DESC", (user["id"],)).fetchall()
     finally:
         conn.close()
     out = []
     for row in rows:
         out.append({"id": row["id"], "user_id": row["user_id"],
-                    "created_at": row["created_at"],
+                    "created_at": row["created_at"], "location": row["video_ref"],
                     "summary": json.loads(row["findings_json"])["summary"]})
     return out
 
@@ -123,8 +125,8 @@ def get_report(rid: int, user=Depends(current_user)):
     finally:
         conn.close()
     data = json.loads(row["findings_json"])
-    return {"id": row["id"], "summary": data["summary"],
-            "findings": data["findings"], "created_at": row["created_at"]}
+    return {"id": row["id"], "summary": data["summary"], "findings": data["findings"],
+            "location": row["video_ref"], "created_at": row["created_at"]}
 
 
 @router.get("/report/{rid}/image")

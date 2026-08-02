@@ -4,17 +4,19 @@ import {
   consultingImageUrl, type Report, type ReportRow,
 } from "../api";
 import { color, edge } from "../theme";
-import { Video, Alert, Chevron, Help } from "../ui/icons";
+import { Video, Alert, Chevron } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Section from "../ui/Section";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 
+const ROOMS = ["거실", "침실", "주방", "화장실", "현관", "기타"];
 const levelColor = (lvl?: string) => (lvl === "높음" ? color.red : lvl === "보통" ? "#B4690E" : color.gray);
 
 export default function Consulting() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [active, setActive] = useState<Report | null>(null);
+  const [room, setRoom] = useState("거실");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showList, setShowList] = useState(false);
@@ -23,10 +25,7 @@ export default function Consulting() {
   const open = async (rid: number) => setActive(await consultingReport(rid));
 
   useEffect(() => {
-    consultingReports().then((rows) => {
-      setReports(rows);
-      if (rows[0]) open(rows[0].id);
-    }).catch(() => {});
+    consultingReports().then((rows) => { setReports(rows); if (rows[0]) open(rows[0].id); }).catch(() => {});
   }, []);
 
   async function upload(e: ChangeEvent<HTMLInputElement>) {
@@ -34,11 +33,11 @@ export default function Consulting() {
     if (!file) return;
     setError(""); setBusy(true); setActive(null);
     try {
-      const { job_id } = await analyzeVideo(file);
+      const { job_id } = await analyzeVideo(file, room);
       for (let i = 0; i < 120; i++) {
         const st = await consultingStatus(job_id);
         if (st.status === "done" && st.report_id != null) { await open(st.report_id); await loadList(); break; }
-        if (st.status === "error") { setError("분석 실패: " + st.error); break; }
+        if (st.status === "error") { setError("분석에 실패했습니다: " + st.error); break; }
         await new Promise((r) => setTimeout(r, 1000));
       }
     } catch (err) {
@@ -48,48 +47,78 @@ export default function Consulting() {
     }
   }
 
+  // 같은 권고문이 중복으로 나오면 하나만 보여준다.
+  const fixes = active ? active.findings.filter((f, i, a) => a.findIndex((g) => g.recommendation === f.recommendation) === i) : [];
   const top = active?.findings[0];
 
   return (
-    <AppShell active="consult" right={<Help size={20} />}>
-      {/* 업로드 */}
+    <AppShell active="consult">
+      {/* 업로드 + 위치 선택 + 안내 */}
       <Section divider={false} gap={16}>
+        <div>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>촬영 위치 선택</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {ROOMS.map((r) => (
+              <button key={r} onClick={() => setRoom(r)}
+                style={{ padding: "8px 14px", fontSize: 16, fontWeight: 700, ...edge(2),
+                         background: room === r ? color.black : color.white, color: room === r ? color.white : color.ink }}>
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <Button as="label" big full icon={<Video color="white" />}>
-          {busy ? "분석 중…" : "Upload Home Video"}
+          {busy ? "분석 중입니다…" : "생활 영상 올리기"}
           <input type="file" accept="video/*" hidden disabled={busy} onChange={upload} />
         </Button>
-        <p style={{ margin: 0, textAlign: "center", color: color.gray, fontSize: 16 }}>
-          집 생활 영상을 올리면 전문 안전 분석 리포트를 만들어 드립니다.
-        </p>
         {error && <p style={{ margin: 0, color: color.red, fontWeight: 700 }}>{error}</p>}
+
+        <Card bg={color.blue3} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {[
+            "위 '생활 영상 올리기' 버튼을 누르고, 집에서 생활하는 모습이 담긴 영상을 선택해 주세요.",
+            "올린 영상을 인공지능이 분석해 낙상 위험이 있는 구역을 찾아냅니다. (30초~1분 정도 걸릴 수 있어요.)",
+            "아래 '최근 분석 결과'에서 위험 구역과 개선 방법을 확인해 주세요.",
+          ].map((t, i) => (
+            <div key={i} style={{ display: "flex", gap: 12 }}>
+              <div style={{ flexShrink: 0, width: 28, height: 28, background: color.black, color: color.white, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>{i + 1}</div>
+              <div style={{ fontSize: 17, lineHeight: 1.5 }}>{t}</div>
+            </div>
+          ))}
+        </Card>
       </Section>
 
-      {/* 최신 분석 결과 */}
-      <Section title="LATEST ANALYSIS RESULT" gap={16}>
-        {!active && <p style={{ margin: 0, color: color.gray }}>아직 분석 결과가 없습니다. 영상을 업로드해 보세요.</p>}
+      {/* 최근 분석 결과 */}
+      <Section title="최근 분석 결과" gap={16}>
+        {!active && <p style={{ margin: 0, color: color.gray }}>아직 분석 결과가 없습니다. 위에서 영상을 올려 주세요.</p>}
         {active && (
           <Card pad={0} style={{ overflow: "hidden" }}>
+            {/* 캡처된 영상 프레임 위에 위험 구역이 빨갛게 표시된 히트맵 */}
             <div style={{ position: "relative", borderBottom: `2px solid ${color.black}` }}>
-              <img src={consultingImageUrl(active.id)} alt="히트맵" style={{ display: "block", width: "100%" }} />
+              <img src={consultingImageUrl(active.id)} alt="위험 구역 히트맵" style={{ display: "block", width: "100%" }} />
               {top && (
                 <div style={{ position: "absolute", left: 16, top: 16, display: "flex", alignItems: "center", gap: 8, background: levelColor(top.level), color: color.white, padding: "8px 12px", ...edge(2) }}>
                   <Alert size={18} color="white" />
-                  <span style={{ fontSize: 15, fontWeight: 700, textTransform: "uppercase" }}>{top.level} RISK</span>
+                  <span style={{ fontSize: 15, fontWeight: 700 }}>위험도 {top.level}</span>
                 </div>
               )}
             </div>
             <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: color.red, textTransform: "uppercase" }}>낙상 위험 감지</h3>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.3 }}>WHY IT&apos;S A HAZARD:</div>
-                <p style={{ margin: "4px 0 0", fontSize: 18, fontWeight: 700, lineHeight: 1.5 }}>{active.summary}</p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: color.red }}>낙상 위험이 감지되었습니다</h3>
+                {active.location && <span style={{ color: color.gray, fontWeight: 700 }}>촬영 위치 · {active.location}</span>}
               </div>
-              {active.findings.map((f, i) => (
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>왜 위험한가요?</div>
+                <p style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.6 }}>{active.summary}</p>
+              </div>
+              {fixes.map((f, i) => (
                 <div key={i} style={{ background: color.blue2, padding: 16, ...edge(2) }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.3 }}>RECOMMENDED FIX · {f.zone}</div>
-                  <p style={{ margin: "6px 0 0", fontSize: 18, fontWeight: 700, lineHeight: 1.5 }}>{f.recommendation}</p>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>권장 개선 방법</div>
+                  <p style={{ margin: "6px 0 0", fontSize: 18, lineHeight: 1.6 }}>{f.recommendation}</p>
                 </div>
               ))}
+              <Button variant="outline" full>확인했어요</Button>
             </div>
           </Card>
         )}
@@ -105,7 +134,7 @@ export default function Consulting() {
           </Card>
           {showList && reports.map((r) => (
             <Card key={r.id} style={{ padding: 12, cursor: "pointer" }} onClick={() => open(r.id)}>
-              <div style={{ fontWeight: 700 }}>#{r.id}</div>
+              <div style={{ fontWeight: 700 }}>{r.location || `리포트 #${r.id}`}</div>
               <div style={{ color: color.gray, fontSize: 15 }}>{r.summary}</div>
             </Card>
           ))}
