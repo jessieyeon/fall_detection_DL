@@ -13,3 +13,4 @@ webservice/frontend/node_modules/
 webservice/frontend/dist/
 webservice/consulting/uploads/
 webservice/consulting/reports/
+*.pt
