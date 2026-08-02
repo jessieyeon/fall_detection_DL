@@ -52,13 +52,21 @@ export default function Live() {
         const { width: W, height: H } = cv;
         ctx.clearRect(0, 0, W, H);
         const s = stateRef.current;
+        // 바닥 2x2 타일 격자 — 선명하게. 발사된 타일은 빨강, 각 칸에 번호(0~3).
         for (let r = 0; r < s.rows; r++)
           for (let c = 0; c < s.cols; c++) {
-            const x = (c / s.cols) * W, y = (r / s.rows) * H;
-            ctx.fillStyle = s.tiles.includes(r * s.cols + c) ? "rgba(186,26,26,0.4)" : "rgba(255,255,255,0.03)";
-            ctx.fillRect(x, y, W / s.cols, H / s.rows);
-            ctx.strokeStyle = "rgba(255,255,255,0.15)";
-            ctx.strokeRect(x, y, W / s.cols, H / s.rows);
+            const idx = r * s.cols + c;
+            const cwid = W / s.cols, chei = H / s.rows;
+            const x = c * cwid, y = r * chei;
+            const fired = s.tiles.includes(idx);
+            ctx.fillStyle = fired ? "rgba(186,26,26,0.55)" : "rgba(255,255,255,0.07)";
+            ctx.fillRect(x, y, cwid, chei);
+            ctx.lineWidth = fired ? 4 : 2;
+            ctx.strokeStyle = fired ? "#ff6b6b" : "rgba(255,255,255,0.55)";
+            ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, cwid - ctx.lineWidth, chei - ctx.lineWidth);
+            ctx.fillStyle = "rgba(255,255,255,0.7)";
+            ctx.font = "bold 20px sans-serif";
+            ctx.fillText(String(idx), x + 10, y + 28);
           }
         if (s.landmarks) {
           ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2;

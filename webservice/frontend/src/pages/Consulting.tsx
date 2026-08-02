@@ -34,12 +34,15 @@ export default function Consulting() {
     setError(""); setBusy(true); setActive(null);
     try {
       const { job_id } = await analyzeVideo(file, room);
-      for (let i = 0; i < 120; i++) {
+      let done = false;
+      // CPU 에서 YOLO 분석이 오래 걸릴 수 있어 넉넉히 기다린다(최대 5분).
+      for (let i = 0; i < 300; i++) {
         const st = await consultingStatus(job_id);
-        if (st.status === "done" && st.report_id != null) { await open(st.report_id); await loadList(); break; }
-        if (st.status === "error") { setError("분석에 실패했습니다: " + st.error); break; }
+        if (st.status === "done" && st.report_id != null) { await open(st.report_id); await loadList(); done = true; break; }
+        if (st.status === "error") { setError("분석에 실패했습니다: " + st.error); done = true; break; }
         await new Promise((r) => setTimeout(r, 1000));
       }
+      if (!done) { await loadList(); setError("분석이 오래 걸리고 있어요. 완료되면 아래 '지난 결과'에 표시됩니다. 잠시 후 다시 확인해 주세요."); }
     } catch (err) {
       setError((err as Error).message);
     } finally {
