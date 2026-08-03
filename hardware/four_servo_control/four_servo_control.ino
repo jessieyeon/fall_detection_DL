@@ -9,13 +9,22 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 #define NUM_SERVOS 4
 const int SERVO_CH[NUM_SERVOS] = {1, 3, 5, 7};  // 타일 0~3 이 연결된 PCA9685 채널
+const int COVER_CH[NUM_SERVOS] = {2, 4, 6, 8};  // 각 타일의 덮개 서보 (타일 i 와 세트)
 
 // 일반적인 서보 기준값 (필요시 미세조정)
 #define SERVO_MIN  102    // 약 0도, 0.5ms 펄스
 #define SERVO_MAX  512    // 약 180도, 2.5ms 펄스
 
-#define HOME_ANGLE   0     // 초기/복귀 위치
-#define MOVE_ANGLE  60     // 작동 위치
+#define HOME_ANGLE     0   // 타일 초기/복귀 위치
+#define MOVE_ANGLE    60   // 타일 작동 위치
+#define COVER_CLOSED   0   // 덮개 닫힘
+#define COVER_OPEN    90   // 덮개 열림 (90도 회전)
+
+// 덮개가 90도 열릴(또는 타일이 내려갈) 때까지 기다리는 시간.
+// 표준 서보의 90도 이동은 대략 0.15~0.3초라 이 정도면 덮개가 먼저 비켜난다.
+// 타일이 덮개를 치면 늘리고, 더 빠른 서보면 줄인다.
+// ponytail: 물리 튜닝값. 하드웨어에 맞춰 조정하는 손잡이.
+#define SEQ_DELAY_MS 200
 
 bool moved[NUM_SERVOS] = {false, false, false, false};
 
@@ -30,6 +39,10 @@ int angleToPulse(int angle) {
 
 void moveServo(int index, int angle) {
   pwm.setPWM(SERVO_CH[index], 0, angleToPulse(angle));
+}
+
+void moveCover(int index, int angle) {
+  pwm.setPWM(COVER_CH[index], 0, angleToPulse(angle));
 }
 
 bool isAllDigits(const char *s) {
@@ -71,6 +84,12 @@ void handleFire(char *args) {
     return;
   }
 
+  // 세트 서보를 먼저 열어 덮개를 치운 뒤 → 잠깐 기다렸다가 → 타일을 올린다.
+  // 여러 장이 동시에 발사돼도 지연은 한 번만 지불해 빠르게 유지한다.
+  for (int i = 0; i < count; i++) {
+    moveCover(wanted[i], COVER_OPEN);
+  }
+  delay(SEQ_DELAY_MS);
   for (int i = 0; i < count; i++) {
     moveServo(wanted[i], MOVE_ANGLE);
     moved[wanted[i]] = true;
@@ -87,10 +106,22 @@ void handleFire(char *args) {
 }
 
 void handleReset() {
+  // 발사와 역순: 타일을 먼저 내리고 → 잠깐 기다렸다가 → 덮개를 닫는다.
+  // 그래야 내려가는 타일이 닫히는 덮개에 걸리지 않는다.
+  bool any = false;
   for (int i = 0; i < NUM_SERVOS; i++) {
     if (moved[i]) {
       moveServo(i, HOME_ANGLE);
-      moved[i] = false;
+      any = true;
+    }
+  }
+  if (any) {
+    delay(SEQ_DELAY_MS);
+    for (int i = 0; i < NUM_SERVOS; i++) {
+      if (moved[i]) {
+        moveCover(i, COVER_CLOSED);
+        moved[i] = false;
+      }
     }
   }
   Serial.println("OK RESET");
@@ -121,10 +152,12 @@ void setup() {
 
   for (int i = 0; i < NUM_SERVOS; i++) {
     moveServo(i, HOME_ANGLE);
+    moveCover(i, COVER_CLOSED);
   }
 
   // '#' 로 시작하는 줄은 파이썬 파서가 무시한다. 사람이 읽을 안내문을 남겨도 된다.
-  Serial.println("# 초기화 완료. 타일 0~3 모두 HOME_ANGLE 로 고정.");
+  // 서보는 물리적으로 8개(타일 4 + 덮개 4)지만 READY 는 타일 수만 보고한다.
+  Serial.println("# 초기화 완료. 타일 0~3 = HOME, 덮개 = 닫힘.");
   Serial.println("# 명령: FIRE 0,2 / RESET / PING");
   Serial.print("READY ");
   Serial.println(NUM_SERVOS);
