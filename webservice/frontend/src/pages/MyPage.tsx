@@ -1,21 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  logout, surveyQuestions, submitSurvey, latestSurvey, makeCode, redeemCode,
-  guardianList, wards, hospitals, floorplanUrl,
-  type User, type SurveyLatest, type Question, type Person, type Ward, type Hospital,
-} from "../api";
+import { logout, redeemCode, wards, type User, type Ward } from "../api";
 import { color, edge } from "../theme";
-import { Check, Person as PersonIcon, Phone, MapPin } from "../ui/icons";
+import { Check } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Section from "../ui/Section";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 
-// 매니페스트 키(공백 없음) → 화면 표시명
-const APARTMENTS = [{ key: "다온아파트", label: "다온 아파트" }];
-const fmtDist = (m: number) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`);
-const daysAgo = (iso: string) => Math.max(0, Math.floor((Date.now() - Date.parse(iso.replace(" ", "T"))) / 86400000));
 const levelColor = (lvl?: string | null) => (lvl === "높음" ? color.red : lvl === "보통" ? "#B4690E" : color.gray);
 
 function AccountCard({ user, onLogout }: { user: User; onLogout: () => void }) {
@@ -44,155 +36,10 @@ export default function MyPage({ user, onLogout }: { user: User; onLogout: () =>
 }
 
 function SeniorHome({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [latest, setLatest] = useState<SurveyLatest | null>(null);
-  const [questions, setQuestions] = useState<Question[] | null>(null); // 진입 시 미리 불러온 캐시
-  const [taking, setTaking] = useState(false);
-  const [answers, setAnswers] = useState<Record<string, number>>({});
-  const [guardians, setGuardians] = useState<Person[]>([]);
-  const [code, setCode] = useState("");
-  const [apt, setApt] = useState<string | null>(null);
-  const [hosp, setHosp] = useState<Hospital[]>([]);
-  const [hospMsg, setHospMsg] = useState("");
-  const [hospLoading, setHospLoading] = useState(false);
-
-  useEffect(() => {
-    latestSurvey().then(setLatest).catch(() => {});
-    guardianList().then(setGuardians).catch(() => {});
-    // 설문 문항을 미리 받아둔다 → '자가진단 시작' 클릭 시 즉시 열림(로딩 대기 없음).
-    surveyQuestions().then((q) => {
-      setQuestions(q.questions);
-      setAnswers(Object.fromEntries(q.questions.map((x) => [x.id, 0])));
-    }).catch(() => {});
-  }, []);
-
-  function startSurvey() { setTaking(true); }
-  async function submit() {
-    const res = await submitSurvey(answers);
-    setLatest({ score: res.score, risk_level: res.risk_level, created_at: new Date().toISOString() });
-    setTaking(false);
-  }
-
-  // 시연 장소 주소가 아직 없어 GPS 좌표로 근처 병원을 찾는다.
-  function findNearby() {
-    if (!navigator.geolocation) { setHospMsg("이 기기에서는 위치 기능을 쓸 수 없습니다."); return; }
-    setHospLoading(true); setHospMsg("");
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try { setHosp(await hospitals({ lat: pos.coords.latitude, lng: pos.coords.longitude })); }
-        catch (e) { setHospMsg("병원 정보를 불러오지 못했습니다. (카카오 키/설정 확인)"); }
-        finally { setHospLoading(false); }
-      },
-      () => { setHospMsg("위치 권한을 허용해 주세요."); setHospLoading(false); },
-    );
-  }
-
   return (
     <AppShell active="mypage">
       <Section title="내 계정" divider={false}>
         <AccountCard user={user} onLogout={onLogout} />
-      </Section>
-
-      <Section title="안전 자가진단">
-        {taking ? (questions ? (
-          <Card style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {questions.map((q) => (
-              <div key={q.id} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ fontWeight: 700 }}>{q.text}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                  {q.options.map((o, i) => (
-                    <label key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <input type="radio" name={q.id} checked={answers[q.id] === i}
-                             onChange={() => setAnswers({ ...answers, [q.id]: i })} />
-                      {o.label}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-            <Button big full onClick={submit}>제출하기</Button>
-          </Card>
-        ) : (
-          <Card style={{ padding: 24 }}>
-            <p style={{ margin: 0, color: color.gray }}>설문을 불러오는 중…</p>
-          </Card>
-        )) : (
-          <Card style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <p style={{ margin: 0, fontSize: 20, lineHeight: 1.6 }}>
-              {latest
-                ? `최근 진단 결과는 '위험도 ${latest.risk_level}' (점수 ${latest.score}) 이며, ${daysAgo(latest.created_at)}일 전에 진행했습니다. 매달 한 번 갱신을 권장합니다.`
-                : "아직 자가진단을 하지 않았습니다. 지금 시작해 안전 상태를 점검해 보세요."}
-            </p>
-            <Button big full onClick={startSurvey}>자가진단 시작</Button>
-          </Card>
-        )}
-      </Section>
-
-      <Section title="보호자 연락처">
-        {guardians.map((g) => (
-          <Card key={g.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <div style={{ width: 42, height: 56, background: color.blue2, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", ...edge(2) }}>
-                <PersonIcon size={24} />
-              </div>
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{g.name}</div>
-                <div style={{ color: color.gray, fontSize: 16 }}>보호자</div>
-              </div>
-            </div>
-            <Button variant="outline" icon={<Phone size={18} />}>전화</Button>
-          </Card>
-        ))}
-        <Card style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <span style={{ color: color.gray }}>{code ? <>연결 코드: <b style={{ color: color.ink, fontSize: 20 }}>{code}</b></> : "보호자에게 알려줄 6자리 코드를 만드세요."}</span>
-          <Button variant="outline" onClick={async () => setCode((await makeCode()).code)}>코드 생성</Button>
-        </Card>
-      </Section>
-
-      <Section title="우리 집 평면도">
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <span style={{ alignSelf: "center", fontWeight: 700 }}>주소 입력:</span>
-          {APARTMENTS.map((a) => (
-            <button key={a.key} onClick={() => setApt(a.key)}
-              style={{ padding: "8px 14px", fontSize: 16, fontWeight: 700, ...edge(2),
-                       background: apt === a.key ? color.black : color.white, color: apt === a.key ? color.white : color.ink }}>
-              {a.label}
-            </button>
-          ))}
-        </div>
-        {apt && (
-          <Card pad={0} style={{ overflow: "hidden" }}>
-            <div style={{ position: "relative", background: color.blue3, minHeight: 120 }}>
-              <img src={floorplanUrl(apt)} alt="평면도" style={{ display: "block", width: "100%" }}
-                   onError={(e) => { e.currentTarget.style.display = "none"; }} />
-              <a href={floorplanUrl(apt)} target="_blank" rel="noreferrer"
-                 style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>
-                <Button icon={<MapPin size={18} color="white" />}>평면도 크게 보기</Button>
-              </a>
-            </div>
-            <div style={{ padding: 16, borderTop: `2px solid ${color.black}`, fontSize: 18 }}>
-              거주지: {APARTMENTS.find((a) => a.key === apt)?.label}
-            </div>
-          </Card>
-        )}
-      </Section>
-
-      <Section title="근처 응급 의료기관" titleColor={color.red}>
-        <Button variant="outline" full onClick={findNearby}>
-          {hospLoading ? "찾는 중…" : "내 주변 병원 찾기"}
-        </Button>
-        {hospMsg && <p style={{ margin: 0, color: color.gray }}>{hospMsg}</p>}
-        {hosp.slice(0, 5).map((h, i) => (
-          <Card key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 700 }}>{h.name}</div>
-              <div style={{ color: color.gray, fontSize: 16 }}>{fmtDist(h.distance_m)} 거리</div>
-            </div>
-            <Button as="a" href={h.phone ? `tel:${h.phone}` : undefined} variant="outline"
-                    style={{ textDecoration: "none", padding: 16 }}>
-              <Phone size={24} color={color.red} />
-            </Button>
-          </Card>
-        ))}
       </Section>
     </AppShell>
   );

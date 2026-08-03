@@ -1,6 +1,36 @@
 # Fall Detection using OpenCV and MediaPipe
 This project is aimed at developing a fall detection system using OpenCV and MediaPipe libraries in Python. The system detects falls by monitoring the movements of individuals captured in live video feeds and triggers an alert when a fall is detected. The implementation involves capturing the video using OpenCV, marking landmarks using MediaPipe, and analyzing the movements to identify falls.
 
+## 빠른 시작 — 다온 웹 플랫폼
+
+이 저장소에는 CV 파이프라인(`main.py`) 위에 얹은 **다온 케어 웹 플랫폼**(`webservice/`)이 들어 있습니다. 아래 순서대로 하면 클론한 뒤 바로 띄울 수 있습니다.
+
+> 빌드 산출물(`webservice/frontend/dist/`), 계정 DB(`webservice/daon.db`), `node_modules/`, YOLO 가중치(`*.pt`)는 gitignore라 저장소에 없습니다. 그래서 **프런트 빌드 + DB 시드**를 직접 해야 합니다.
+
+```bash
+# 1) 클론 + 파이썬 의존성  (macOS는 먼저 `brew install cmake`)
+git clone https://github.com/jessieyeon/fall_detection_DL.git
+cd fall_detection_DL
+git checkout feature/daon-web-platform
+pip install -r requirements.txt
+
+# 2) 프런트엔드 빌드  (이게 없으면 서버가 빈 화면)
+cd webservice/frontend && npm install && npm run build && cd ../..
+
+# 3) 데모 계정 DB 시드
+python3 -m webservice.seed        # senior@daon.com / guardian@daon.com (둘 다 비번 pw)
+
+# 4) 서버 실행 → 브라우저에서 http://localhost:8000
+python3 -m uvicorn webservice.app:app --port 8000
+```
+
+- **YOLO 가중치**(`yolo11m.pt`)는 컨설팅 첫 분석 때 자동 다운로드됩니다.
+- **실시간 중계**에 실제 카메라를 흘려보내려면 별도 터미널에서:
+  `python main.py --live-url http://localhost:8000`
+- 자세한 시연 절차·구성도는 [DEMO_PREP.md](DEMO_PREP.md), 프런트엔드 개발 과정은 [FRONTEND.md](FRONTEND.md) 참고.
+
+아래 내용은 CV 파이프라인(`main.py`, 아두이노/서보) 자체에 대한 설명입니다.
+
 ## Requirements
 On macOS, `face_recognition` builds `dlib` from source, so install `cmake` first:
 
