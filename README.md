@@ -24,6 +24,18 @@ python3 -m webservice.seed        # senior@daon.com / guardian@daon.com (둘 다
 python3 -m uvicorn webservice.app:app --port 8000
 ```
 
+**한 번에 실행 (권장)**: 위 1~3은 최초 1회만 하면 됩니다. 그다음부터는 웹앱 + 감지
+파이프라인 + 아두이노를 한 줄로 띄웁니다(아두이노 포트 자동 탐지, Ctrl-C 로 전부 종료):
+
+```bash
+./run.sh
+# 포트 직접 지정:   PORT=/dev/cu.usbmodemXXXX ./run.sh
+# 녹화 영상 사용:   SOURCE=test_videos/S01T13R01_.mp4 ./run.sh
+```
+
+포트를 못 찾으면 서보 없이(시뮬레이션) 앱만 계속 돕니다. (Windows에서는 bash가 없어
+`./run.sh` 대신 4번 uvicorn 과 `py main.py --port COM3 --live-url ...` 를 각각 실행하세요.)
+
 - **YOLO 가중치**(`yolo11m.pt`)는 컨설팅 첫 분석 때 자동 다운로드됩니다.
 - **실시간 중계**에 실제 카메라를 흘려보내려면 별도 터미널에서:
   `python main.py --live-url http://localhost:8000`
