@@ -29,6 +29,11 @@ python3 -m uvicorn webservice.app:app --port 8000
   `python main.py --live-url http://localhost:8000`
 - 자세한 시연 절차·구성도는 [DEMO_PREP.md](DEMO_PREP.md), 프런트엔드 개발 과정은 [FRONTEND.md](FRONTEND.md) 참고.
 
+**Windows 참고**
+- `python3` 대신 `python` 또는 `py`를 씁니다. 예: `py -m webservice.seed`, `py -m uvicorn webservice.app:app --port 8000`.
+- `brew install cmake`는 macOS 전용입니다. `requirements.txt`의 `face_recognition`은 dlib를 소스 빌드해서 CMake + Visual Studio C++ Build Tools가 필요합니다. **웹 플랫폼은 `face_recognition`을 쓰지 않으므로**(얼굴인식은 `main.py --face-every` 옵션 전용, 기본 꺼짐), 웹 데모만 볼 거면 `requirements.txt`에서 `face_recognition==1.3.0` 줄을 지우고 `pip install -r requirements.txt` 하면 됩니다.
+- `npm install && npm run build` 등 나머지 명령은 PowerShell/cmd에서 동일하게 동작합니다. 아두이노 포트만 `/dev/cu.usbmodemXXXX` 대신 `COM3` 형식입니다.
+
 아래 내용은 CV 파이프라인(`main.py`, 아두이노/서보) 자체에 대한 설명입니다.
 
 ## Requirements
