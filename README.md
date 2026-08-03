@@ -27,6 +27,8 @@ python3 -m uvicorn webservice.app:app --port 8000
 - **YOLO 가중치**(`yolo11m.pt`)는 컨설팅 첫 분석 때 자동 다운로드됩니다.
 - **실시간 중계**에 실제 카메라를 흘려보내려면 별도 터미널에서:
   `python main.py --live-url http://localhost:8000`
+  - 아두이노(타일/덮개)까지 붙이려면 `--port` 추가: `python main.py --port <포트> --live-url http://localhost:8000`
+  - 포트 이름은 컴퓨터마다 다릅니다. macOS `ls /dev/cu.usbmodem*`, Linux `ls /dev/ttyACM*`, Windows 장치 관리자 "포트(COM & LPT)" (또는 Arduino IDE `도구 → 포트`)로 확인. 코드에 하드코딩된 포트는 없어 실행 시 값만 바꾸면 됩니다. 자세한 표는 아래 [아두이노 / 서보 신호](#아두이노--서보-신호) 참고.
 - 자세한 시연 절차·구성도는 [DEMO_PREP.md](DEMO_PREP.md), 프런트엔드 개발 과정은 [FRONTEND.md](FRONTEND.md) 참고.
 
 **Windows 참고**
@@ -128,8 +130,20 @@ drawing the grid overlay on screen.
 
 ### 아두이노 / 서보 신호
 
-`--port` 로 시리얼 포트를 지정합니다(예: macOS `/dev/cu.usbmodemXXXX`,
-Windows `COM3`). 생략하면 시뮬레이션 모드로 동작하며 신호는 콘솔에만 찍힙니다.
+`--port` 로 시리얼 포트를 지정합니다. 생략하면 시뮬레이션 모드로 동작하며 신호는
+콘솔에만 찍힙니다. **포트 이름은 코드에 하드코딩돼 있지 않으므로**, 컴퓨터·USB 자리가
+바뀌면 실행할 때 아래 방법으로 확인해 `--port` 값만 바꿔 넣으면 됩니다:
+
+| OS | 포트 찾기 | 예시 |
+|---|---|---|
+| macOS | `ls /dev/cu.usbmodem*` | `/dev/cu.usbmodemXXXX` |
+| Linux | `ls /dev/ttyACM*` | `/dev/ttyACM0` |
+| Windows | 장치 관리자 → 포트(COM & LPT) | `COM3` |
+
+제일 확실한 방법은 Arduino IDE `도구 → 포트` 에 체크된 이름을 그대로 쓰는 것입니다.
+이 프로젝트 보드는 **Arduino UNO R4 WiFi** 입니다 — 네이티브 USB라 업로드가
+"No device found" 로 실패하면 보드의 RESET 을 빠르게 두 번(더블탭) 눌러 부트로더
+(L LED가 숨쉬듯 깜빡임)에 넣은 뒤 업로드합니다.
 
 프로토콜은 줄 단위 텍스트이고 보율은 115200입니다.
 
@@ -142,12 +156,17 @@ Windows `COM3`). 생략하면 시뮬레이션 모드로 동작하며 신호는 �
 | — | `ERR <사유>` |
 | — | `# <주석, 무시됨>` |
 
-타일 번호는 어디서나 0-indexed 입니다. 타일 번호와 PCA9685 채널의 매핑은
-`.ino` 안에만 있습니다.
+타일 번호는 어디서나 0-indexed 입니다. 서보는 물리적으로 **8개**입니다 — 타일 4개는
+PCA9685 채널 **1,3,5,7**, 각 타일의 덮개 서보 4개는 채널 **2,4,6,8**(타일 `i` 와 세트)에
+연결됩니다. `FIRE` 시 덮개를 90도 **먼저** 열고 잠깐(`SEQ_DELAY_MS`, 기본 200ms) 뒤
+타일을 올리며, `RESET` 은 역순(타일 내림 → 덮개 닫음)으로 처리해 내려가는 타일이 닫히는
+덮개에 걸리지 않게 합니다. `READY` 가 보고하는 개수는 타일 수(4)입니다. 채널 매핑과
+각도·타이밍 상수는 모두 `.ino` 안에 있습니다.
 
-시리얼 모니터(115200, 줄 끝 "새 줄")에서 `FIRE 1,3` 을 직접 입력하면 파이썬 없이
-하드웨어만 시험할 수 있습니다. 서보 4개 동시 기동은 `FIRE 0,1,2,3` 으로
-확인하세요 — 전원 용량이 부족하면 보드가 리셋됩니다.
+시리얼 모니터(115200, 줄 끝 "새 줄")에서 `FIRE 0` 을 직접 입력하면 파이썬 없이
+하드웨어만 시험할 수 있습니다(→ ch2 덮개 열림 → ch1 타일 상승, 이어 `RESET`). 서보를
+여러 장 동시 기동할 때 전원이 부족하면 보드가 리셋되니, 외부 5~6V 전원을 PCA9685
+V+ 에 공급하고 아두이노와 공통 접지하세요.
 
 ### Working of the Prototype
 [Working Demo with Fall Detection and Face Recognition](https://drive.google.com/file/d/1HhNCq11J1ZNmuDoxo6KYVFS1S7IJZid7/view?usp=sharing)
