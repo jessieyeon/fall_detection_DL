@@ -11,6 +11,9 @@
 체류가 아니라 동선을 보는 이유는 rules.py 의 모듈 독스트링을 참고.
 """
 
+import math
+import os
+
 import cv2
 import numpy as np
 
@@ -20,6 +23,16 @@ DEFAULT_MIN_STEP_FRAC = 0.02   # 이만큼 못 움직이면 '제자리'로 보�
 DEFAULT_RADIUS_FRAC = 0.035    # 발끝 한 점이 차지하는 바닥 면적의 반지름
 DEFAULT_SMOOTH_WINDOW = 5      # 궤적 이동평균 창(프레임)
 DEFAULT_MAX_GAP = 3            # 이 프레임 수 이하의 미검출은 보간해서 잇는다
+
+# 회전 지점 가중치. 근거와 '왜 7.9 를 그대로 쓰지 않는가'는 turn_weights() 참고.
+TURN_ANGLE_THRESHOLD_DEG = float(os.environ.get("DAON_TURN_ANGLE_DEG", "45"))
+TURN_WEIGHT = float(os.environ.get("DAON_TURN_WEIGHT", "2.5"))
+
+# 렌더링 색상 (OpenCV 는 BGR 순서). 프런트 theme.ts 의 브랜드 컬러와 맞춘다.
+PATH_COLOR = (160, 40, 20)      # 브랜드 블루 #1428A0
+TURN_COLOR = (0, 145, 245)      # 주황 — 회전 지점
+START_COLOR = (80, 165, 45)     # 초록 — 시작
+END_COLOR = (60, 60, 225)       # 빨강 — 끝
 
 
 # --------------------------------------------------------------------------
@@ -162,8 +175,45 @@ def _disc_kernel(radius):
     return ((xx * xx + yy * yy) <= radius * radius).astype(np.float32)
 
 
+def heading_changes(seg):
+    """구간의 각 점에서 진행 방향이 몇 도 꺾이는지(도 단위, 0~180).
+
+    양 끝점은 앞뒤 방향 중 하나가 없으므로 0으로 둔다.
+    """
+    n = len(seg)
+    out = [0.0] * n
+    for i in range(1, n - 1):
+        ax, ay = seg[i][0] - seg[i - 1][0], seg[i][1] - seg[i - 1][1]
+        bx, by = seg[i + 1][0] - seg[i][0], seg[i + 1][1] - seg[i][1]
+        na = (ax * ax + ay * ay) ** 0.5
+        nb = (bx * bx + by * by) ** 0.5
+        if na == 0 or nb == 0:
+            continue
+        cos = max(-1.0, min(1.0, (ax * bx + ay * by) / (na * nb)))
+        out[i] = math.degrees(math.acos(cos))
+    return out
+
+
+def turn_weights(seg, angle_threshold=TURN_ANGLE_THRESHOLD_DEG,
+                 weight=TURN_WEIGHT):
+    """회전 지점에 가중치를 준 점별 배열.
+
+    근거: 회전 중 낙상은 직선 보행 중 낙상보다 고관절 골절로 이어질 확률이
+    7.9배 높다(Cumming & Klineberg 1994). 일상 보행 걸음의 최대 절반이 회전
+    동작이기도 하다(Glaister et al. 2007).
+
+    다만 7.9 를 그대로 곱하지 않는다. 그 수치는 '낙상이 일어났을 때 골절로
+    이어질 확률'이지 '낙상이 일어날 확률'이 아니다. 그대로 쓰면 회전 지점이
+    모든 판정을 지배해버린다. 보수적으로 낮은 값을 기본으로 두고 환경변수로
+    조정할 수 있게 했다. 자세한 논의는 docs/낙상-동선-근거.md 참고.
+    """
+    return [weight if a >= angle_threshold else 1.0
+            for a in heading_changes(seg)]
+
+
 def accumulate_passage_map(segments, height, width,
-                           radius_frac=DEFAULT_RADIUS_FRAC, blur=31):
+                           radius_frac=DEFAULT_RADIUS_FRAC, blur=31,
+                           turn_weight=TURN_WEIGHT):
     """동선 구간들 → 통행량 지도(float32, height×width).
 
     경로 점을 임펄스로 찍은 뒤 원판 커널로 한 번 필터링한다. `cv2.circle` 로
@@ -174,10 +224,11 @@ def accumulate_passage_map(segments, height, width,
     """
     impulses = np.zeros((height, width), dtype=np.float32)
     for seg in segments:
-        for (x, y) in seg:
+        weights = turn_weights(seg, weight=turn_weight)
+        for (x, y), w in zip(seg, weights):
             xi = min(max(int(round(x)), 0), width - 1)
             yi = min(max(int(round(y)), 0), height - 1)
-            impulses[yi, xi] += 1.0        # 겹치는 점은 실제로 더해진다
+            impulses[yi, xi] += w          # 겹치는 점은 실제로 더해진다
 
     diag = (height ** 2 + width ** 2) ** 0.5
     radius = max(1, int(round(diag * radius_frac)))
@@ -235,15 +286,32 @@ def render_heatmap_png(heatmap, out_path, background=None):
     cv2.imwrite(out_path, color)
 
 
-def draw_path(img, segments):
+def draw_path(img, segments, scale=1.0):
     """방 사진 위에 이동 경로를 선으로 그린다(그 자리에서 수정).
 
-    선 색은 시작(파랑)에서 끝(빨강)으로 변해 진행 방향을 읽을 수 있게 했다.
-    흰 테두리를 먼저 깔아 어두운 바닥 위에서도 보이게 한다.
+    선 굵기와 표식 크기는 프레임 크기에 비례한다. 고정 픽셀로 두면 1080p 원본에서
+    실낱같이 얇게 보이고 저해상도에서는 화면을 덮는다.
+
+    표현 규칙
+      · 경로는 단색(브랜드 블루). 진행 방향 그라디언트를 썼더니 왕복 경로에서
+        두 번째 통과가 첫 번째를 덮어써 색이 뒤집혀 보였다 — 같은 길을 여러 번
+        지나는 것이 정상인 데이터라 방향 표현은 오히려 오해를 만든다
+      · 흰 테두리를 먼저 깔아 어두운 바닥 위에서도 보이게 한다
+      · 시작점은 초록 원, 끝점은 빨간 원. 왕복이면 둘이 겹치므로 시작점을
+        나중에 그려 위로 올린다
+      · 회전 지점은 주황 원 — 근거상 낙상 위험이 높은 지점이라 따로 표시한다
+        (회전 중 낙상은 고관절 골절 위험 7.9배, docs/낙상-동선-근거.md §근거 2)
     """
     pts_total = sum(len(s) for s in segments)
     if pts_total == 0:
         return img
+
+    h, w = img.shape[:2]
+    unit = max(h, w) / 720.0 * scale        # 720px 기준으로 잡은 굵기를 비례 조정
+    line_w = max(4, int(round(7 * unit)))
+    halo_w = line_w + max(4, int(round(5 * unit)))
+    dot_r = max(6, int(round(11 * unit)))
+    turn_r = max(4, int(round(7 * unit)))
 
     def as_int(p):
         return (int(round(p[0])), int(round(p[1])))
@@ -253,52 +321,67 @@ def draw_path(img, segments):
     for seg in segments:
         for i in range(len(seg) - 1):
             cv2.line(img, as_int(seg[i]), as_int(seg[i + 1]),
-                     (255, 255, 255), 5, cv2.LINE_AA)
+                     (255, 255, 255), halo_w, cv2.LINE_AA)
 
-    drawn = 0
     for seg in segments:
         for i in range(len(seg) - 1):
-            t = drawn / max(pts_total - 1, 1)               # 0 → 1 진행도
-            col = (int(255 * (1 - t)), 60, int(255 * t))    # BGR: 파랑 → 빨강
-            cv2.line(img, as_int(seg[i]), as_int(seg[i + 1]), col, 3, cv2.LINE_AA)
-            drawn += 1
-        drawn += 1                                          # 구간 사이 진행도 보정
+            cv2.line(img, as_int(seg[i]), as_int(seg[i + 1]), PATH_COLOR,
+                     line_w, cv2.LINE_AA)
 
+    # 회전 지점 — 선 위에, 끝점 아래 순서로 그린다
     for seg in segments:
-        if not seg:
-            continue
-        s, e = as_int(seg[0]), as_int(seg[-1])
-        cv2.circle(img, s, 7, (255, 255, 255), -1)
-        cv2.circle(img, s, 5, (255, 120, 0), -1)      # 시작점(파랑)
-        cv2.circle(img, e, 7, (255, 255, 255), -1)
-        cv2.circle(img, e, 5, (0, 60, 255), -1)       # 끝점(빨강)
+        for (x, y), ang in zip(seg, heading_changes(seg)):
+            if ang < TURN_ANGLE_THRESHOLD_DEG:
+                continue
+            p = as_int((x, y))
+            cv2.circle(img, p, turn_r + max(2, int(2 * unit)), (255, 255, 255), -1,
+                       cv2.LINE_AA)
+            cv2.circle(img, p, turn_r, TURN_COLOR, -1, cv2.LINE_AA)
+
+    ring = max(3, int(round(4 * unit)))
+    for seg in segments:                       # 끝점 먼저
+        if seg:
+            e = as_int(seg[-1])
+            cv2.circle(img, e, dot_r + ring, (255, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(img, e, dot_r, END_COLOR, -1, cv2.LINE_AA)
+    for seg in segments:                       # 시작점을 위에 — 겹쳐도 보이게
+        if seg:
+            s = as_int(seg[0])
+            cv2.circle(img, s, dot_r + ring, (255, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(img, s, dot_r, START_COLOR, -1, cv2.LINE_AA)
     return img
 
 
-def render_hazard_boxes(frame, findings, rows, cols, out_path, segments=None):
-    """방 프레임 위에 위험 구역(격자 셀)을 반투명 빨간 박스 + 굵은 테두리로 표시.
+def render_hazard_boxes(frame, findings, rows, cols, out_path, segments=None,
+                        show_zone_box=False):
+    """방 프레임 위에 동선을 그려 저장한다.
 
-    `segments` 를 주면 위험 구역 아래에 이동 경로도 함께 그린다. 경로가 있으면
-    '왜 이 구역이 위험한가'(= 자주 지나다닌다)가 그림 한 장으로 설명된다.
+    `show_zone_box=True` 면 위험 구역(격자 셀)을 반투명 박스로 함께 덮는다.
+    **기본은 꺼져 있다.** 판정 기준이 체류 히트맵에서 동선으로 바뀌면서, 화면의
+    3분의 1을 덮는 빨간 사각형이 정작 보여줘야 할 경로를 가리게 됐다. 어느 구역이
+    위험한지는 리포트 문구가 이미 말해주므로, 그림은 경로를 보여주는 데 집중한다.
+
+    (함수 이름은 호출부·테스트 호환을 위해 유지한다.)
     """
     img = frame.copy()
     if segments:
         draw_path(img, segments)
-    h, w = img.shape[:2]
-    ch, cw = h // rows, w // cols
-    seen = set()
-    for f in findings:
-        cell = tuple(f["cell"])
-        if cell in seen:
-            continue
-        seen.add(cell)
-        r, c = cell
-        x1, y1 = int(c * cw), int(r * ch)
-        x2, y2 = int(x1 + cw), int(y1 + ch)
-        col = (0, 0, 255) if f["level"] == "높음" else \
-              (0, 140, 255) if f["level"] == "보통" else (170, 170, 170)
-        overlay = img.copy()
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), col, -1)
-        cv2.addWeighted(overlay, 0.25, img, 0.75, 0, dst=img)  # 반투명 채움
-        cv2.rectangle(img, (x1, y1), (x2, y2), col, 4)          # 굵은 테두리
+    if show_zone_box:
+        h, w = img.shape[:2]
+        ch, cw = h // rows, w // cols
+        seen = set()
+        for f in findings:
+            cell = tuple(f["cell"])
+            if cell in seen:
+                continue
+            seen.add(cell)
+            r, c = cell
+            x1, y1 = int(c * cw), int(r * ch)
+            x2, y2 = int(x1 + cw), int(y1 + ch)
+            col = (0, 0, 255) if f["level"] == "높음" else \
+                  (0, 140, 255) if f["level"] == "보통" else (170, 170, 170)
+            overlay = img.copy()
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), col, -1)
+            cv2.addWeighted(overlay, 0.25, img, 0.75, 0, dst=img)
+            cv2.rectangle(img, (x1, y1), (x2, y2), col, 4)
     cv2.imwrite(out_path, img)

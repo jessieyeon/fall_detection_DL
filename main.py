@@ -137,6 +137,10 @@ def main():
             webapp = None
 
     try:
+        # 브라우저에서 '카메라 잠시 끊기'를 누르면 여기로 전달된다. 중계를 안 쓰면
+        # 콜백이 없으므로 기존과 똑같이 계속 촬영한다.
+        pause_check = getattr(webapp, "should_pause", None) if webapp else None
+
         source = pose_source.PoseSource(
             video_source=video_source,
             model_bundle=model_bundle,
@@ -144,6 +148,7 @@ def main():
             tile_grid=tile_grid,
             face_every=args.face_every,
             face_recognizer=build_face_recognizer(args.face_every),
+            pause_check=pause_check,
         )
     except ValueError as exc:
         print(f"오류: {exc}")
@@ -238,6 +243,11 @@ def main():
                 # 카운터는 발사와 동시에 0으로 리셋되어 아무 단서를 안 남긴다
                 cv2.putText(image, f"FIRED {sorted(active_tiles)}", (10, 120),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+
+            # 오버레이(격자·위험 점수·발사 표시)까지 그린 화면을 그대로 중계한다.
+            # 로컬 창과 브라우저가 같은 그림을 보여야 현장에서 헷갈리지 않는다.
+            if webapp is not None and hasattr(webapp, "push_frame"):
+                webapp.push_frame(image)
 
             cv2.imshow("Fall Detection", image)
             if (cv2.waitKey(1) & 0xFF) == 27:

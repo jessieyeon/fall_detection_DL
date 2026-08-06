@@ -30,7 +30,8 @@ def test_hazard_boxes_marks_cell_red(tmp_path):
     frame = np.zeros((30, 30, 3), dtype=np.uint8)          # 검은 방
     findings = [{"cell": [0, 0], "level": "높음"}]           # 좌상단 셀이 위험
     out = os.path.join(tmp_path, "box.png")
-    heatmap.render_hazard_boxes(frame, findings, 3, 3, out)
+    # 구역 박스는 기본으로 꺼져 있다(동선 전환 후 경로를 가려서). 명시적으로 켠다.
+    heatmap.render_hazard_boxes(frame, findings, 3, 3, out, show_zone_box=True)
     img = cv2.imread(out)
     assert img is not None and img.shape == (30, 30, 3)
     # 좌상단(위험 셀)에는 빨강이 칠해지고, 우하단은 그대로 검정.

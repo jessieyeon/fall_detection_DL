@@ -36,3 +36,10 @@ hardware/
 *.mov
 *.mp4
 .DS_Store
+
+# ── 위 확장자 제외에서 되살릴 것들 ──────────────────────────────────────────
+# 앱이 실제로 서빙하는 자산이라 이미지에 반드시 들어가야 한다.
+# (이 negation 이 없으면 평면도가 404 나고 샘플 캐시 이미지가 깨진다.)
+!webservice/data/**
+!webservice/consulting/samples/**
+!webservice/frontend/public/**

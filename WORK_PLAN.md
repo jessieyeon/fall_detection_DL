@@ -309,6 +309,30 @@ webservice/frontend 를 보호자용 대시보드 컨셉으로 리디자인해�
 
 ---
 
+## ✅ 진행 상황 (2026-08-06 기준)
+
+작업 A·B·C·D·E·F·G 완료. 남은 것은 콘텐츠(영상)와 최종 점검(H)뿐입니다.
+
+| 작업 | 상태 | 비고 |
+|---|---|---|
+| A 속도 최적화 | ✅ | 분 단위 → 체감 0.35초 (추론 14ms/프레임) |
+| B 동선 전환 | ✅ | 통과 횟수가 값에 선형 반영됨 |
+| C 경로 시각화 | ✅ | 굵은 선 + 시작/끝/회전 표식, 빨간 박스 제거 |
+| D 배포 | ✅ | https://falldetectiondl-production.up.railway.app |
+| E 근거 리서치 | ✅ | docs/낙상-동선-근거.md |
+| F 프런트 리디자인 | ✅ | 삼성 블루, 반응형, 게스트 진입 |
+| G 캐싱·부하 방어 | ✅ | 영상만 넣고 `build_samples.py` 실행하면 됨 |
+| H 최종 점검 | ⬜ | 영상 통합 후 |
+
+**은서님 대기 항목**
+
+1. AI 할머니 영상 3개 → `webservice/frontend/public/samples/{bedroom,living,kitchen}.mp4`
+2. 데모 영상 → `webservice/frontend/public/demo/fall-detection-demo.mp4`
+3. 삼성생명 CI 정확한 HEX → `src/theme.ts` 상단 `BRAND` 상수
+4. 영상 넣은 뒤 `python3 scripts/build_samples.py --auto` 실행 후 커밋
+
+---
+
 ## 작업 G. 결과 캐싱 + 데모 콘텐츠 통합
 
 **우선순위: 2 / 예상 0.5일 / 8/14 / 작업 A~D 이후**

@@ -58,7 +58,9 @@ RUN mkdir -p /app/.ultralytics && \
     ls -la yolo11n.pt
 
 # 업로드·리포트 저장 경로. 볼륨을 안 붙이면 재시작 시 사라진다(가이드 참고).
-RUN mkdir -p webservice/consulting/uploads webservice/consulting/reports
+# samples/ 는 사전 계산된 캐시라 저장소에서 그대로 복사돼 온다(비어 있어도 무방).
+RUN mkdir -p webservice/consulting/uploads webservice/consulting/reports \
+             webservice/consulting/samples
 
 EXPOSE 8000
 ENV PORT=8000

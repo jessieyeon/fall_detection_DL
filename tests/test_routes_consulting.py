@@ -97,6 +97,71 @@ def test_analyze_requires_login(env):
     assert r.status_code == 401
 
 
+def test_cache_hit_skips_analysis(env, monkeypatch, tmp_path):
+    """체험용 샘플이면 분석을 건너뛰고 즉시 리포트가 나와야 한다."""
+    import os
+    from webservice import routes_consulting as rc
+
+    image = os.path.join(tmp_path, "cached.png")
+    with open(image, "wb") as f:
+        f.write(b"fake-png")
+
+    called = []
+    monkeypatch.setattr(rc, "_analyze",
+                        lambda p: called.append(p) or (_ for _ in ()).throw(
+                            AssertionError("캐시가 있는데 분석을 돌렸다")))
+    monkeypatch.setattr(rc, "_lookup_cache", lambda path: {
+        "location": "안방",
+        "findings": {"summary": "미리 계산된 요약", "findings": [], "grid": [],
+                     "evidence": "근거"},
+        "image": image,
+    })
+
+    senior = _login(env, "s@d.com")
+    r = senior.post("/api/consulting/analyze",
+                    files={"file": ("bedroom.mp4", b"sample-bytes", "video/mp4")},
+                    data={"location": "안방"})
+    assert r.status_code == 200
+
+    # 폴링 없이 바로 done — 프런트 흐름은 그대로 쓰면서 대기가 0이 된다
+    st = senior.get(f"/api/consulting/status/{r.json()['job_id']}").json()
+    assert st["status"] == "done"
+
+    report = senior.get(f"/api/consulting/report/{st['report_id']}").json()
+    assert report["summary"] == "미리 계산된 요약"
+    assert report["evidence"] == "근거"
+    assert not called
+
+
+def test_unknown_video_still_runs_real_analysis(env, monkeypatch):
+    """캐시에 없는 영상은 지금까지처럼 실제 분석을 타야 한다."""
+    from webservice import routes_consulting as rc
+    monkeypatch.setattr(rc, "_lookup_cache", lambda path: None)
+
+    senior = _login(env, "s@d.com")
+    r = senior.post("/api/consulting/analyze",
+                    files={"file": ("mine.mp4", b"unseen", "video/mp4")})
+    st = senior.get(f"/api/consulting/status/{r.json()['job_id']}").json()
+    assert st["status"] == "done" and st["report_id"] is not None
+
+
+def test_busy_server_returns_503(env, monkeypatch):
+    """대기열이 가득 차면 무한 대기가 아니라 명확한 거절이어야 한다."""
+    from webservice.consulting import jobs
+    from webservice import routes_consulting as rc
+    monkeypatch.setattr(rc, "_lookup_cache", lambda path: None)
+
+    def busy(job_id, fn):
+        raise jobs.TooBusy("지금 분석 요청이 많아 처리할 수 없습니다.")
+    monkeypatch.setattr("webservice.consulting.jobs.run_in_background", busy)
+
+    senior = _login(env, "s@d.com")
+    r = senior.post("/api/consulting/analyze",
+                    files={"file": ("x.mp4", b"bytes", "video/mp4")})
+    assert r.status_code == 503
+    assert "분석 요청이 많아" in r.json()["detail"]
+
+
 def test_safe_upload_path_strips_traversal():
     import os
     from webservice import routes_consulting as rc

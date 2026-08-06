@@ -78,6 +78,27 @@ def _ensure_readable(video_path):
     return ensure_readable(video_path)
 
 
+def _lookup_cache(video_path):
+    """체험용 샘플이면 사전 계산 결과, 아니면 None. (테스트 monkeypatch 훅)"""
+    from webservice.consulting import cache
+    return cache.lookup(video_path)
+
+
+def _insert_report(user_id, video_ref, image_path, report):
+    """리포트 행을 만들고 id 를 돌려준다. 실제 분석과 캐시 적중이 공유한다."""
+    conn = db.connect()
+    try:
+        cur = conn.execute(
+            "INSERT INTO reports (user_id, video_ref, heatmap_path, findings_json) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, video_ref, image_path,
+             json.dumps(report, ensure_ascii=False)))
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
 def _unpack(result):
     """분석 결과를 (지도, 첫 프레임, 동선 구간들)로 편다.
 
@@ -114,6 +135,15 @@ async def analyze(user=Depends(current_user), file: UploadFile = File(...),
     user_id = user["id"]
     video_ref = location or file.filename   # 촬영 위치(거실 등)를 저장, 없으면 파일명
 
+    # 체험용 샘플이면 사전 계산된 결과를 바로 돌려준다. 분석은 건너뛰지만
+    # DB 행은 똑같이 만들어서 리포트 조회·목록·이미지 서빙이 그대로 동작한다.
+    cached = _lookup_cache(video_path)
+    if cached is not None:
+        rid = _insert_report(user_id, video_ref or cached["location"],
+                             cached["image"], cached["findings"])
+        os.remove(video_path)               # 샘플 원본을 중복 보관할 이유가 없다
+        return {"job_id": jobs.complete(jobs.create_job(), rid)}
+
     def job():
         # 아이폰 .mov(HEVC) 등 OpenCV 가 못 읽는 형식을 먼저 H.264 로 맞춘다.
         # 이미 읽을 수 있으면 그대로 통과한다.
@@ -124,26 +154,19 @@ async def analyze(user=Depends(current_user), file: UploadFile = File(...),
             if converted and os.path.isfile(path):
                 os.remove(path)
         report = rules.analyze_report(hm)          # 기본 3×3 격자
-        rid_name = uuid.uuid4().hex
-        png_path = os.path.join(_REPORT_DIR, f"{rid_name}.png")
-        # 방 위에 이동 경로를 선으로 그리고, 가장 위험한 구역만 빨간 박스로
-        # 덮는다. 경로가 함께 보여야 '왜 이 구역인가'가 설명된다.
+        png_path = os.path.join(_REPORT_DIR, f"{uuid.uuid4().hex}.png")
+        # 방 사진 위에 이동 경로를 그린다. 구역 박스는 경로를 가려서 기본 off.
         heatmap.render_hazard_boxes(first, report["findings"][:1], 3, 3, png_path,
                                     segments=segments)
-        conn = db.connect()
-        try:
-            cur = conn.execute(
-                "INSERT INTO reports (user_id, video_ref, heatmap_path, findings_json) "
-                "VALUES (?, ?, ?, ?)",
-                (user_id, video_ref, png_path,
-                 json.dumps(report, ensure_ascii=False)))
-            conn.commit()
-            return cur.lastrowid
-        finally:
-            conn.close()
+        return _insert_report(user_id, video_ref, png_path, report)
 
     job_id = jobs.create_job()
-    jobs.run_in_background(job_id, job)
+    try:
+        jobs.run_in_background(job_id, job)
+    except jobs.TooBusy as exc:
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        raise HTTPException(status_code=503, detail=str(exc))
     return {"job_id": job_id}
 
 
@@ -196,7 +219,9 @@ def get_report(rid: int, user=Depends(current_user)):
         conn.close()
     data = json.loads(row["findings_json"])
     return {"id": row["id"], "summary": data["summary"], "findings": data["findings"],
-            "location": row["video_ref"], "created_at": row["created_at"]}
+            "location": row["video_ref"], "created_at": row["created_at"],
+            # 예전에 저장된 리포트에는 evidence 가 없다(키 추가 이전). 없으면 생략.
+            "evidence": data.get("evidence")}
 
 
 @router.get("/report/{rid}/image")

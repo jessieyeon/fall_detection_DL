@@ -4,7 +4,11 @@ export interface SurveyLatest { score: number; risk_level: string; created_at: s
 export interface Question { id: string; text: string; options: { label: string; points: number }[] }
 export interface Questionnaire { questions: Question[]; thresholds: Record<string, number> }
 export interface Finding { zone: string; cell: [number, number]; score: number; level: string; recommendation: string }
-export interface Report { id: number; summary: string; findings: Finding[]; location: string; created_at: string }
+export interface Report {
+  id: number; summary: string; findings: Finding[]; location: string; created_at: string;
+  /** 판정 기준의 문헌 근거 설명 (docs/낙상-동선-근거.md) */
+  evidence?: string;
+}
 export interface ReportRow { id: number; user_id: number; created_at: string; location: string; summary: string }
 export interface Hospital { name: string; address: string; phone: string; distance_m: number; url: string }
 export interface Ward { id: number; name: string; risk_level: string | null }

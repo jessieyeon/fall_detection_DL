@@ -117,10 +117,49 @@ TEMPLATE = """<!DOCTYPE html>
 """
 
 
+def serve(path, port=8899):
+    """테스트 페이지를 http 로 띄운다.
+
+    파일을 그냥 더블클릭해 열면 주소가 `file://` 인데, CSP 의 `frame-ancestors *`
+    는 http/https/ws/wss 같은 **네트워크 스킴만** 매칭한다. 그래서 배포가 멀쩡해도
+    브라우저가 이렇게 거부한다:
+
+        Framing '...' violates ... "frame-ancestors *". ...
+        Note that '*' matches only URLs with network schemes ...
+
+    실제 전시 사이트는 https 라 문제가 없다. 테스트만 http 로 맞춰주면 된다.
+    """
+    import functools
+    import http.server
+    import socketserver
+    import webbrowser
+
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    filename = os.path.basename(path)
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=directory)
+    socketserver.TCPServer.allow_reuse_address = True
+    with socketserver.TCPServer(("127.0.0.1", port), handler) as httpd:
+        url = f"http://127.0.0.1:{port}/{filename}"
+        print(f"\n테스트 페이지: {url}")
+        print("Ctrl+C 로 종료합니다.\n")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("\n종료")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("url", help="배포된 앱의 공개 URL (https://...)")
     ap.add_argument("-o", "--out", default="iframe_test.html")
+    ap.add_argument("--no-serve", action="store_true",
+                    help="파일만 만들고 로컬 서버를 띄우지 않는다")
+    ap.add_argument("--port", type=int, default=8899)
     args = ap.parse_args()
 
     url = args.url.rstrip("/")
@@ -134,7 +173,14 @@ def main():
         f.write(TEMPLATE.format(url=url))
 
     print(f"생성: {os.path.abspath(args.out)}")
-    print(f"열기: open {args.out}")
+
+    if args.no_serve:
+        print("\n주의: 이 파일을 그대로 열면(file://) CSP 때문에 iframe 이 차단됩니다.")
+        print("      'frame-ancestors *' 는 http/https 만 매칭하고 file:// 은 제외됩니다.")
+        print(f"      http 로 띄우려면:  python3 -m http.server {args.port}")
+        return
+
+    serve(args.out, args.port)
 
 
 if __name__ == "__main__":

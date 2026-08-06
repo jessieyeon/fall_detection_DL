@@ -175,6 +175,75 @@ def test_empty_segments_give_cold_map():
 
 
 # --------------------------------------------------------------------------
+# 회전 가중치 — docs/낙상-동선-근거.md §근거 2
+# --------------------------------------------------------------------------
+
+def _straight_frames(n=60, y=300.0):
+    return [[_box_at(float(x), y)] for x in np.linspace(60, W - 60, n)]
+
+
+def _corner_frames(n=60, corner=(200.0, 240.0)):
+    """ㄱ자 경로 — 중간에 90도 가까이 꺾인다."""
+    cx, cy = corner
+    half = n // 2
+    first = [[_box_at(float(x), cy)] for x in np.linspace(60, cx, half)]
+    second = [[_box_at(cx, float(y))] for y in np.linspace(cy, 60, n - half)]
+    return first + second
+
+
+def test_heading_changes_zero_on_straight_line():
+    seg = [(float(x), 100.0) for x in range(0, 100, 10)]
+    assert max(heatmap.heading_changes(seg)) < 1e-6
+
+
+def test_heading_changes_detects_right_angle():
+    seg = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (20.0, 20.0)]
+    assert max(heatmap.heading_changes(seg)) == pytest.approx(90.0, abs=1e-6)
+
+
+def test_endpoints_have_no_heading_change():
+    """양 끝점은 앞뒤 방향 중 하나가 없어 각도를 정의할 수 없다."""
+    seg = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
+    ang = heatmap.heading_changes(seg)
+    assert ang[0] == 0.0 and ang[-1] == 0.0
+
+
+def test_turn_weight_applies_only_past_threshold():
+    seg = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (20.0, 20.0)]
+    w = heatmap.turn_weights(seg, angle_threshold=45, weight=2.5)
+    assert w == [1.0, 1.0, 2.5, 1.0, 1.0]
+
+
+def test_corner_scores_higher_than_straight_path():
+    """같은 통행량이면 꺾이는 동선이 더 위험하게 나와야 한다.
+
+    근거: 회전 중 낙상은 직선 보행 중 낙상보다 고관절 골절 위험이 7.9배
+    (Cumming & Klineberg 1994).
+    """
+    straight = heatmap.accumulate_passage_map(
+        heatmap.extract_path(_straight_frames(), H, W), H, W)
+    corner = heatmap.accumulate_passage_map(
+        heatmap.extract_path(_corner_frames(), H, W), H, W)
+    assert corner.max() > straight.max()
+
+
+def test_turn_weight_can_be_disabled():
+    """가중치를 1.0 으로 두면 순수 통행량만 본다 — 근거를 끄고 비교할 수 있어야 한다."""
+    segs = heatmap.extract_path(_corner_frames(), H, W)
+    weighted = heatmap.accumulate_passage_map(segs, H, W, turn_weight=2.5)
+    plain = heatmap.accumulate_passage_map(segs, H, W, turn_weight=1.0)
+    assert weighted.max() > plain.max()
+
+
+def test_report_includes_evidence_note():
+    """리포트에 근거 설명이 함께 담겨야 권고가 왜 의미 있는지 설명된다."""
+    segs = heatmap.extract_path(_walking_frames(passes=2), H, W)
+    report = rules.analyze_report(heatmap.accumulate_passage_map(segs, H, W))
+    assert "Cochrane" in report["evidence"]
+    assert "38%" in report["evidence"]
+
+
+# --------------------------------------------------------------------------
 # analyze 계층
 # --------------------------------------------------------------------------
 
@@ -239,6 +308,54 @@ def test_draw_path_marks_the_route(tmp_path):
     # 경로가 지나간 하단은 칠해지고, 경로가 없던 최상단은 검정 그대로
     assert img[240, 150].sum() > 0
     assert img[5, 150].sum() == 0
+
+
+def test_zone_box_is_off_by_default(tmp_path):
+    """빨간 구역 박스는 화면의 1/3을 덮어 경로를 가린다 — 기본은 꺼짐."""
+    import os
+    import cv2
+    frame = np.zeros((H, W, 3), dtype=np.uint8)
+    findings = [{"cell": [0, 0], "level": "높음"}]
+
+    off = os.path.join(tmp_path, "off.png")
+    on = os.path.join(tmp_path, "on.png")
+    heatmap.render_hazard_boxes(frame, findings, 3, 3, off)
+    heatmap.render_hazard_boxes(frame, findings, 3, 3, on, show_zone_box=True)
+
+    # 좌상단 셀 안쪽: 기본은 검정 그대로, 켜면 빨강이 칠해진다
+    assert cv2.imread(off)[30, 30].sum() == 0
+    assert cv2.imread(on)[30, 30][2] > 40
+
+
+def test_path_is_thick_enough_to_see(tmp_path):
+    """선이 얇으면 리포트에서 안 보인다. 프레임 크기에 비례해 굵어져야 한다."""
+    import os
+    import cv2
+    for size, min_thickness in [((480, 640), 6), ((1080, 1920), 14)]:
+        h, w = size
+        frame = np.zeros((h, w, 3), dtype=np.uint8)
+        seg = [(w * 0.2, h * 0.5), (w * 0.8, h * 0.5)]
+        out = os.path.join(tmp_path, f"p{h}.png")
+        heatmap.render_hazard_boxes(frame, [], 3, 3, out, segments=[seg])
+        img = cv2.imread(out)
+        column = img[:, int(w * 0.5)]
+        drawn = int((column.sum(axis=1) > 0).sum())
+        assert drawn >= min_thickness, f"{size} 에서 선 두께 {drawn}px"
+
+
+def test_turn_points_are_marked(tmp_path):
+    """회전 지점에 표식이 찍혀야 한다 — 근거상 가장 위험한 지점이므로."""
+    import os
+    import cv2
+    frame = np.zeros((H, W, 3), dtype=np.uint8)
+    segs = heatmap.extract_path(_corner_frames(), H, W)
+    out = os.path.join(tmp_path, "turn.png")
+    heatmap.render_hazard_boxes(frame, [], 3, 3, out, segments=segs)
+
+    img = cv2.imread(out)
+    b, g, r = img[:, :, 0], img[:, :, 1], img[:, :, 2]
+    orange = ((r > 180) & (g > 100) & (g < 200) & (b < 90)).sum()
+    assert orange > 20, "회전 표식(주황)이 그려지지 않았다"
 
 
 def test_render_hazard_boxes_without_segments_still_works(tmp_path):

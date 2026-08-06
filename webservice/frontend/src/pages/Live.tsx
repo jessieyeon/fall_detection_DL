@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { color, edge } from "../theme";
-import { Wifi, Phone } from "../ui/icons";
+import { color, font, radius } from "../theme";
+import { Video, Wifi, Alert, MapPin, Pause, Play } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
+
+/**
+ * 데모 영상 경로. 영상 파일은 별도 제공 예정이므로 경로만 상수로 둔다.
+ * 파일을 webservice/frontend/public/ 에 넣으면 이 경로로 서빙된다.
+ */
+const DEMO_VIDEO_SRC = "/demo/fall-detection-demo.mp4";
+const DEMO_POSTER_SRC = "/demo/fall-detection-demo.jpg";
+
+/** 감지 파이프라인이 밀어넣는 카메라 영상(MJPEG). main.py --live-url 이 채운다. */
+const STREAM_SRC = "/api/live/stream.mjpg";
 
 const CONNECTIONS: [number, number][] = [
   [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
@@ -11,26 +21,26 @@ const CONNECTIONS: [number, number][] = [
   [23, 25], [25, 27], [24, 26], [26, 28],
 ];
 const LOCATIONS = ["거실", "침실", "주방", "화장실"];
-const FLOOR_TOP = 0.6;   // 타일 바닥 띠 시작 위치(위에서 60% 지점 아래 = 발 밑)
-type LiveState = { landmarks: number[][] | null; tiles: number[]; rows: number; cols: number };
+const FLOOR_TOP = 0.6;
 
-export default function Live() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+type LiveState = { landmarks: number[][] | null; tiles: number[]; rows: number; cols: number };
+type Stage = "idle" | "searching" | "none" | "demo";
+
+/** 감지 파이프라인이 붙어 있는지 확인 — WebSocket 으로 포즈가 들어오는지 본다.
+ *
+ * 페이지에 들어오는 즉시 연결한다. '카메라 연결'을 누른 뒤에 붙이면 WebSocket
+ * 핸드셰이크와 첫 포즈 수신까지 기다려야 해서, 실제로 파이프라인이 돌고 있는데도
+ * 타임아웃에 걸려 '카메라 없음'으로 빠진다. */
+function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
+                     pausedRef: React.RefObject<boolean>) {
   const stateRef = useRef<LiveState>({ landmarks: null, tiles: [], rows: 2, cols: 2 });
   const lastPose = useRef<number | null>(null);
-  const [location, setLocation] = useState("거실");
-  const [alerting, setAlerting] = useState(false);
-  const [, setTick] = useState(0);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 2000);
-    return () => clearInterval(id);
-  }, []);
 
   useEffect(() => {
     let ws: WebSocket | undefined;
     let retryTimer: ReturnType<typeof setTimeout>;
     let mounted = true;
+
     const connect = () => {
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
       ws = new WebSocket(`${proto}://${window.location.host}/ws/live`);
@@ -48,12 +58,22 @@ export default function Live() {
     let raf = 0;
     const draw = () => {
       const cv = canvasRef.current;
-      if (cv) {
+      // 일시정지 중에는 캔버스를 건드리지 않는다 — 마지막 화면이 그대로 멈춰 있어야
+      // 무엇 때문에 멈췄는지(자세, 타일) 들여다볼 수 있다.
+      if (cv && !pausedRef.current) {
         const ctx = cv.getContext("2d")!;
         const { width: W, height: H } = cv;
-        ctx.clearRect(0, 0, W, H);
         const s = stateRef.current;
-        // 바닥 타일 격자 — 화면 아래쪽 바닥 띠(발 밑)에만 그린다. 발사된 타일은 빨강.
+
+        // 배경: 카메라 원본 대신 어두운 그라디언트. 영상을 그대로 보여주지 않는 것이
+        // 제품의 약속(자세만 보고 영상은 저장하지 않는다)이라, 화면도 그걸 따른다.
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, "#101623");
+        bg.addColorStop(1, "#1A2438");
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
+
+        // 바닥 타일: 원근감 있는 격자. 낙상 시 해당 칸이 붉게 점등된다.
         const floorY = H * FLOOR_TOP, floorH = H - floorY;
         for (let r = 0; r < s.rows; r++)
           for (let c = 0; c < s.cols; c++) {
@@ -61,91 +81,471 @@ export default function Live() {
             const cwid = W / s.cols, chei = floorH / s.rows;
             const x = c * cwid, y = floorY + r * chei;
             const fired = s.tiles.includes(idx);
-            ctx.fillStyle = fired ? "rgba(186,26,26,0.55)" : "rgba(255,255,255,0.07)";
-            ctx.fillRect(x, y, cwid, chei);
-            ctx.lineWidth = fired ? 4 : 2;
-            ctx.strokeStyle = fired ? "#ff6b6b" : "rgba(255,255,255,0.55)";
-            ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, cwid - ctx.lineWidth, chei - ctx.lineWidth);
-            ctx.fillStyle = "rgba(255,255,255,0.7)";
-            ctx.font = "bold 20px sans-serif";
-            ctx.fillText(String(idx), x + 10, y + 28);
+            ctx.fillStyle = fired ? "rgba(225,60,60,0.45)" : "rgba(255,255,255,0.03)";
+            ctx.fillRect(x + 3, y + 3, cwid - 6, chei - 6);
+            ctx.lineWidth = fired ? 2.5 : 1;
+            ctx.strokeStyle = fired ? "#ff6b6b" : "rgba(120,150,210,0.25)";
+            ctx.strokeRect(x + 3, y + 3, cwid - 6, chei - 6);
           }
+
         if (s.landmarks) {
-          ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2;
+          const px = (p: number[]) => [p[0] * W, p[1] * H] as const;
+
+          // 뼈대: 은은한 광 + 굵고 둥근 선. 브랜드 블루 톤.
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.shadowColor = "rgba(90,140,255,0.85)";
+          ctx.shadowBlur = 14;
+          ctx.strokeStyle = "#6E9BFF";
+          ctx.lineWidth = 5;
           for (const [a, b] of CONNECTIONS) {
             const pa = s.landmarks[a], pb = s.landmarks[b];
-            if (pa && pb) { ctx.beginPath(); ctx.moveTo(pa[0] * W, pa[1] * H); ctx.lineTo(pb[0] * W, pb[1] * H); ctx.stroke(); }
+            if (pa && pb) {
+              ctx.beginPath();
+              ctx.moveTo(...px(pa));
+              ctx.lineTo(...px(pb));
+              ctx.stroke();
+            }
           }
-          ctx.fillStyle = "#fbbf24";
-          for (const p of s.landmarks) { ctx.beginPath(); ctx.arc(p[0] * W, p[1] * H, 4, 0, Math.PI * 2); ctx.fill(); }
+          ctx.shadowBlur = 0;
+
+          // 관절: 흰 테두리를 두른 점. 주요 관절만 찍어 깔끔하게.
+          const JOINTS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+          for (const i of JOINTS) {
+            const p = s.landmarks[i];
+            if (!p) continue;
+            const [x, y] = px(p);
+            ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fillStyle = "#FFFFFF"; ctx.fill();
+            ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+            ctx.fillStyle = "#3D6DE8"; ctx.fill();
+          }
+
+          // 머리: 어깨 중점 위에 원. 랜드마크 0(코)을 중심으로 쓴다.
+          const nose = s.landmarks[0], ls = s.landmarks[11], rs = s.landmarks[12];
+          if (nose && ls && rs) {
+            const [nx, ny] = px(nose);
+            const headR = Math.max(10, Math.hypot(
+              (ls[0] - rs[0]) * W, (ls[1] - rs[1]) * H) * 0.32);
+            ctx.beginPath(); ctx.arc(nx, ny, headR, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(110,155,255,0.25)"; ctx.fill();
+            ctx.lineWidth = 3; ctx.strokeStyle = "#6E9BFF"; ctx.stroke();
+          }
+        } else {
+          // 사람이 안 잡히는 동안의 빈 화면 안내
+          ctx.fillStyle = "rgba(255,255,255,0.35)";
+          ctx.font = "15px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("사람이 감지되면 여기에 표시됩니다", W / 2, H / 2);
         }
       }
       raf = requestAnimationFrame(draw);
     };
     draw();
     return () => { mounted = false; clearTimeout(retryTimer); cancelAnimationFrame(raf); ws?.close(); };
+  }, [canvasRef, pausedRef]);
+
+  return lastPose;
+}
+
+type Diag = { reachable: boolean; frames: number; streaming: boolean; paused: boolean };
+
+/** 카메라 연결을 끊거나 다시 잇는다. 실제로 장치를 놓는 것은 감지 파이프라인이고,
+ *  여기서는 서버에 의사만 남긴다(파이프라인이 0.5초마다 가져간다). */
+async function setCameraPaused(paused: boolean) {
+  const r = await fetch("/api/live/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paused }),
+  });
+  if (!r.ok) throw new Error("카메라 제어에 실패했습니다");
+  return (await r.json()).paused as boolean;
+}
+
+/** 서버가 파이프라인으로부터 프레임을 받고 있는지 주기적으로 확인한다.
+ *
+ * WebSocket 과 별개의 신호라, 'ws 는 막혔는데 파이프라인은 도는' 경우를 잡아낸다.
+ * 실패 원인을 화면에 그대로 보여주기 위한 진단 용도이기도 하다. */
+function useServerStatus(): Diag {
+  const [diag, setDiag] = useState<Diag>({
+    reachable: true, frames: 0, streaming: false, paused: false,
+  });
+  const prev = useRef<{ frames: number; at: number } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const r = await fetch("/api/live/status", { cache: "no-store" });
+        if (!r.ok) throw new Error();
+        const { frames, paused } = await r.json();
+        if (!alive) return;
+        const last = prev.current;
+        // 프레임 수가 '늘고 있어야' 살아 있는 것이다. 값이 0이 아니어도
+        // 멈춰 있으면 파이프라인이 종료된 뒤 남은 숫자일 뿐이다.
+        const streaming = last != null && frames > last.frames;
+        prev.current = { frames, at: Date.now() };
+        setDiag({ reachable: true, frames, streaming, paused: !!paused });
+      } catch {
+        if (alive) setDiag((d) => ({ ...d, reachable: false, streaming: false }));
+      }
+    };
+    poll();
+    const id = setInterval(poll, 1500);
+    return () => { alive = false; clearInterval(id); };
   }, []);
 
-  // 최근에 포즈 데이터를 받고 있으면 ON(연결됨), 아니면 OFF.
-  const on = lastPose.current != null && Date.now() - lastPose.current < 5000;
-  const activity = lastPose.current == null ? "감지 대기 중"
-    : (() => { const s = Math.floor((Date.now() - lastPose.current) / 1000); return s < 60 ? `${s}초 전` : `${Math.floor(s / 60)}분 전`; })();
+  return diag;
+}
 
-  function callEmergency() {
-    setAlerting(true);
-    setTimeout(() => setAlerting(false), 6000);
+export default function Live() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [stage, setStage] = useState<Stage>("idle");
+  const [location, setLocation] = useState("거실");
+  const [videoBroken, setVideoBroken] = useState(false);
+  const [streamBroken, setStreamBroken] = useState(false);
+  // 서버가 진실이지만 폴링이 1.5초라 눌렀을 때 즉시 반응하도록 잠깐 덮어쓴다.
+  const [pendingPause, setPendingPause] = useState<boolean | null>(null);
+  const [controlError, setControlError] = useState("");
+  const [, setTick] = useState(0);
+
+  const diag = useServerStatus();
+  const paused = pendingPause ?? diag.paused;
+
+  // 서버가 우리 요청을 반영하면 임시 덮어쓰기를 푼다.
+  useEffect(() => {
+    if (pendingPause !== null && diag.paused === pendingPause) setPendingPause(null);
+  }, [diag.paused, pendingPause]);
+
+  // 렌더 루프(requestAnimationFrame)가 최신 값을 읽어야 해서 ref 로 넘긴다.
+  // state 를 바로 넘기면 effect 안의 클로저가 옛 값을 붙들고 있다.
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+
+  const lastPose = useLiveFeed(canvasRef, pausedRef);
+
+  async function togglePause() {
+    const next = !paused;
+    setControlError("");
+    setPendingPause(next);
+    try {
+      await setCameraPaused(next);
+    } catch (err) {
+      setPendingPause(null);
+      setControlError((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  // 카메라가 붙었는지는 두 신호 중 **하나만** 살아 있어도 인정한다.
+  //   · WebSocket 으로 들어오는 포즈 (스켈레톤)
+  //   · 서버가 받은 프레임 수의 증가 (영상)
+  // WebSocket 만 보면, 프록시나 방화벽이 ws 를 막는 환경에서 실제로 파이프라인이
+  // 돌고 있는데도 '카메라 없음'이 된다.
+  const poseOn = lastPose.current != null && Date.now() - lastPose.current < 5000;
+  // 일시 해제 중에는 프레임이 안 오는 게 정상이므로 '연결 없음'으로 떨어뜨리면 안 된다.
+  // 다만 한 번도 붙은 적 없는데 플래그만 남아 있는 경우는 제외한다.
+  const on = poseOn || diag.streaming || (paused && diag.frames > 0);
+
+  // '카메라 연결' → 최대 3초간 포즈 수신을 기다린다. 들어오면 실시간 화면,
+  // 안 들어오면 부스 안내. 이미 연결돼 있으면 즉시 넘어간다.
+  function connect() {
+    if (on) { setStage("demo"); return; }
+    setStage("searching");
+    const deadline = Date.now() + 3000;
+    const tick = setInterval(() => {
+      const live = lastPose.current != null && Date.now() - lastPose.current < 5000;
+      if (live || Date.now() > deadline) {
+        clearInterval(tick);
+        setStage(live ? "demo" : "none");
+      }
+    }, 200);
   }
 
   return (
     <AppShell active="monitor">
-      {/* 위치 입력 */}
-      <div>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>위치 입력</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-          {LOCATIONS.map((r) => (
-            <button key={r} onClick={() => setLocation(r)}
-              style={{ padding: "8px 14px", fontSize: 16, fontWeight: 700, ...edge(2),
-                       background: location === r ? color.black : color.white, color: location === r ? color.white : color.ink }}>
-              {r}
-            </button>
-          ))}
-        </div>
-      </div>
+      <h1 style={{ margin: 0, fontSize: font.h1, fontWeight: 700 }}>실시간 감지</h1>
 
-      {/* 실시간 피드(타일 + 사람 스켈레톤). 세로로 긴 9:16 비율 */}
-      <div style={{ position: "relative", background: color.black, ...edge(2) }}>
-        <canvas ref={canvasRef} width={480} height={854} style={{ display: "block", width: "100%", height: "auto" }} />
-        <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 8 }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 6, background: on ? color.red : color.gray, color: color.white, padding: "4px 10px", fontSize: 14, fontWeight: 700, ...edge(2, color.white) }}>
-            <span style={{ width: 8, height: 8, borderRadius: 8, background: color.white }} /> {on ? "ON" : "OFF"}
+      {stage === "idle" && (
+        <Card raised style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          gap: 16, padding: "40px 24px", textAlign: "center",
+        }}>
+          <span style={{
+            width: 56, height: 56, borderRadius: 16,
+            background: on ? color.greenTint : color.brandTint,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <Video size={26} color={on ? color.green : color.brand} />
           </span>
-          <span style={{ background: "rgba(0,0,0,0.5)", color: color.white, padding: "4px 10px", fontSize: 14, fontWeight: 700, ...edge(2, color.white) }}>{location}</span>
-        </div>
-      </div>
-
-      {/* 상태 */}
-      <Card style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 16 }}>
-        <div>
-          <div style={{ color: color.gray, fontSize: 15 }}>마지막 활동 감지</div>
-          <div style={{ fontWeight: 700 }}>{activity}</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, color: on ? color.ink : color.gray }}>
-          <Wifi size={20} />
-          <span style={{ fontWeight: 700 }}>{on ? "신호 양호" : "연결 대기"}</span>
-        </div>
-      </Card>
-
-      {/* 긴급 전화 — 실제 발신 대신 알림 표시(MVP) */}
-      <Button variant="danger" big full icon={<Phone color="white" />} onClick={callEmergency}
-              style={{ flexDirection: "column", gap: 4 }}>
-        긴급 전화
-        <span style={{ fontSize: 14, fontWeight: 700 }}>119 / 지역 응급 서비스</span>
-      </Button>
-      {alerting && (
-        <Card bg={color.red} style={{ color: color.white, textAlign: "center", fontWeight: 700, fontSize: 18 }}>
-          🚨 긴급 전화 알림을 보냈습니다. 곧 응급 서비스로 연결됩니다.
+          <div>
+            <div style={{ fontSize: font.h2, fontWeight: 700 }}>
+              {on ? "카메라가 감지되었습니다" : "카메라가 연결되지 않았습니다"}
+            </div>
+            <p style={{ margin: "6px 0 0", fontSize: font.small, color: color.inkSoft, lineHeight: 1.6 }}>
+              {on
+                ? "지금 바로 실시간 낙상 감지 화면을 볼 수 있습니다."
+                : "집에 설치된 다온 카메라를 연결해 주세요."}
+            </p>
+          </div>
+          <Button big onClick={connect} icon={<Video size={17} color={color.white} />}>
+            {on ? "실시간 화면 보기" : "카메라 연결"}
+          </Button>
         </Card>
       )}
+
+      {stage === "searching" && (
+        <Card style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          gap: 14, padding: "44px 24px",
+        }}>
+          <Spinner />
+          <div style={{ fontSize: font.body, color: color.inkSoft }}>카메라를 찾는 중…</div>
+        </Card>
+      )}
+
+      {stage === "none" && (
+        <>
+          <Card raised style={{ padding: 24, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <span style={{
+                width: 34, height: 34, flexShrink: 0, borderRadius: 10,
+                background: color.amberTint, display: "flex",
+                alignItems: "center", justifyContent: "center",
+              }}>
+                <Alert size={17} color={color.amber} />
+              </span>
+              <div>
+                <div style={{ fontSize: font.h2, fontWeight: 700 }}>
+                  연결할 수 있는 카메라가 없습니다
+                </div>
+                <p style={{ margin: "6px 0 0", fontSize: font.small, color: color.inkSoft, lineHeight: 1.7 }}>
+                  온라인 체험에서는 실제 카메라를 연결할 수 없습니다.
+                  <br />
+                  <b style={{ color: color.ink }}>전시 부스에 방문하시면 실시간 낙상 감지와
+                  충격 완화 타일 작동을 직접 체험하실 수 있습니다.</b>
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button onClick={() => setStage("demo")} icon={<Video size={16} color={color.white} />}>
+                데모 영상 보기
+              </Button>
+              <Button variant="ghost" onClick={() => setStage("idle")}>다시 시도</Button>
+            </div>
+
+            {/* 개발·현장 진단. 무엇 때문에 못 붙었는지 화면에서 바로 보이게 한다. */}
+            <details style={{ fontSize: font.caption, color: color.inkFaint }}>
+              <summary style={{ cursor: "pointer" }}>연결 상태 자세히</summary>
+              <div style={{
+                marginTop: 8, padding: 12, background: color.bg,
+                borderRadius: radius.md, display: "flex",
+                flexDirection: "column", gap: 5, lineHeight: 1.6,
+              }}>
+                <Row ok={diag.reachable}>서버 연결</Row>
+                <Row ok={poseOn}>스켈레톤 수신 (WebSocket)</Row>
+                <Row ok={diag.streaming}>
+                  카메라 영상 수신 (누적 {diag.frames}프레임)
+                </Row>
+                <div style={{ marginTop: 6, color: color.inkSoft }}>
+                  {!diag.reachable
+                    ? "백엔드가 꺼져 있습니다. uvicorn 이 8000 포트에서 도는지 확인하세요."
+                    : diag.frames === 0
+                    ? "감지 파이프라인이 아직 아무것도 보내지 않았습니다. 터미널에서 실행하세요:\n" +
+                      "python3 main.py 0 --no-serial --live-url http://localhost:8000"
+                    : "프레임이 들어온 적은 있으나 지금은 멈춰 있습니다. main.py 가 종료되지 않았는지 확인하세요."}
+                </div>
+              </div>
+            </details>
+          </Card>
+
+          <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <MapPin size={16} color={color.brand} />
+            <span style={{ fontSize: font.small, color: color.ink }}>
+              부스에서는 카메라·아두이노 타일이 실제로 작동합니다.
+            </span>
+          </Card>
+        </>
+      )}
+
+      {stage === "demo" && (
+        <>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: font.caption, color: color.inkFaint, marginRight: 4 }}>
+              촬영 위치
+            </span>
+            {LOCATIONS.map((r) => (
+              <button key={r} onClick={() => setLocation(r)} style={{
+                padding: "5px 11px", fontSize: font.caption, fontWeight: 600,
+                borderRadius: 999, border: `1px solid ${location === r ? color.brand : color.line}`,
+                background: location === r ? color.brand : color.surface,
+                color: location === r ? color.white : color.inkSoft,
+              }}>
+                {r}
+              </button>
+            ))}
+          </div>
+
+          <Card pad={0} style={{ overflow: "hidden" }}>
+            <div style={{ position: "relative", background: "#0E1116" }}>
+              {on ? (
+                // 카메라 원본은 보여주지 않는다. 자세(스켈레톤)만 캔버스에 그린다 —
+                // '영상을 저장하지 않고 자세만 본다'는 제품의 약속을 화면이 증명한다.
+                <div style={{ position: "relative", lineHeight: 0 }}>
+                  <canvas ref={canvasRef} width={480} height={720}
+                          style={{
+                            display: "block", width: "100%", height: "auto",
+                            opacity: paused ? 0.3 : 1,
+                            transition: "opacity .2s",
+                          }} />
+                  {paused && (
+                    <div style={{
+                      position: "absolute", inset: 0,
+                      display: "flex", flexDirection: "column",
+                      alignItems: "center", justifyContent: "center", gap: 10,
+                    }}>
+                      <Pause size={30} color="rgba(255,255,255,0.7)" />
+                      <div style={{ fontSize: font.small, color: "rgba(255,255,255,0.85)" }}>
+                        카메라 연결을 끊었습니다
+                      </div>
+                      <div style={{ fontSize: font.caption, color: "rgba(255,255,255,0.5)" }}>
+                        카메라가 해제되어 촬영하지 않습니다
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : videoBroken ? (
+                // 영상 파일이 아직 없을 때(개발 중) 깨진 재생기 대신 안내를 보여준다.
+                <div style={{
+                  aspectRatio: "9 / 16", maxHeight: 520, display: "flex",
+                  flexDirection: "column", alignItems: "center", justifyContent: "center",
+                  gap: 10, padding: 24, textAlign: "center",
+                }}>
+                  <Video size={30} color="rgba(255,255,255,0.5)" />
+                  <div style={{ fontSize: font.small, color: "rgba(255,255,255,0.75)" }}>
+                    데모 영상을 준비 중입니다
+                  </div>
+                  <div style={{ fontSize: font.caption, color: "rgba(255,255,255,0.45)" }}>
+                    {DEMO_VIDEO_SRC}
+                  </div>
+                </div>
+              ) : (
+                <video src={DEMO_VIDEO_SRC} poster={DEMO_POSTER_SRC}
+                       controls autoPlay muted loop playsInline
+                       onError={() => setVideoBroken(true)}
+                       style={{ display: "block", width: "100%", height: "auto" }} />
+              )}
+              <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 6 }}>
+                <Badge tone={paused ? "muted" : on ? "live" : "demo"}>
+                  {paused ? "연결 끊김" : on ? "LIVE" : "데모 영상"}
+                </Badge>
+                <Badge tone="muted">{location}</Badge>
+              </div>
+
+              {on && (
+                <button onClick={togglePause} disabled={pendingPause !== null}
+                        aria-label={paused ? "카메라 다시 연결" : "카메라 연결 끊기"}
+                        style={{
+                          position: "absolute", right: 12, bottom: 12,
+                          display: "flex", alignItems: "center", gap: 7,
+                          padding: "8px 13px", borderRadius: 999,
+                          background: "rgba(0,0,0,0.6)", color: color.white,
+                          fontSize: font.caption, fontWeight: 600,
+                          backdropFilter: "blur(4px)",
+                          opacity: pendingPause !== null ? 0.6 : 1,
+                        }}>
+                  {paused ? <Play size={13} color={color.white} />
+                          : <Pause size={13} color={color.white} />}
+                  {pendingPause !== null ? "전환 중…"
+                    : paused ? "카메라 다시 연결" : "카메라 잠시 끊기"}
+                </button>
+              )}
+            </div>
+          </Card>
+
+          {controlError && (
+            <Card bg={color.redTint} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <Alert size={16} color={color.red} />
+              <span style={{ fontSize: font.small, color: color.red, fontWeight: 600 }}>
+                {controlError}
+              </span>
+            </Card>
+          )}
+
+          {paused && (
+            <Card bg={color.amberTint} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <Alert size={16} color={color.amber} />
+              <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
+                <b>카메라 연결이 끊긴 상태입니다.</b> 촬영과 낙상 감지가 모두 멈춰 있어,
+                이 사이에 일어난 일은 기록되지 않습니다.
+                다시 연결하면 몇 초 안에 화면이 돌아옵니다.
+              </span>
+            </Card>
+          )}
+
+          {on && !paused && (
+            <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <Wifi size={16} color={color.brand} />
+              <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
+                카메라 영상은 화면에 표시하거나 저장하지 않습니다.
+                AI가 인식한 <b>자세(스켈레톤)만</b> 실시간으로 보여드립니다.
+              </span>
+            </Card>
+          )}
+          {!on && (
+            <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <Wifi size={16} color={color.brand} />
+              <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
+                지금은 녹화된 데모 영상입니다.
+                <b> 전시 부스에 방문하시면 카메라를 직접 연결해</b> 실시간 낙상 감지와
+                타일 작동을 체험하실 수 있습니다.
+              </span>
+            </Card>
+          )}
+        </>
+      )}
     </AppShell>
+  );
+}
+
+function Row({ ok, children }: { ok: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+      <span style={{
+        width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+        background: ok ? color.green : color.red,
+      }} />
+      <span style={{ color: ok ? color.ink : color.inkSoft }}>{children}</span>
+    </div>
+  );
+}
+
+function Badge({ tone, children }: { tone: "live" | "demo" | "muted"; children: React.ReactNode }) {
+  const skin = {
+    live: { background: color.red, color: color.white },
+    demo: { background: color.brand, color: color.white },
+    muted: { background: "rgba(0,0,0,0.55)", color: color.white },
+  }[tone];
+  return (
+    <span style={{
+      ...skin, padding: "3px 9px", fontSize: font.caption, fontWeight: 700,
+      borderRadius: radius.sm, letterSpacing: 0.2,
+    }}>
+      {children}
+    </span>
+  );
+}
+
+function Spinner({ size = 26 }: { size?: number }) {
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: "50%",
+      border: `2.5px solid ${color.brandTint2}`, borderTopColor: color.brand,
+      animation: "daon-spin .8s linear infinite", display: "inline-block",
+    }} />
   );
 }

@@ -36,6 +36,10 @@ export const MapPin = svg("0 0 24 24", (
 ))
 export const Alert = svg("0 0 24 24", <path d="M12 2 1 21h22L12 2Zm1 15h-2v-2h2v2Zm0-4h-2V9h2v4Z" />)
 export const Chevron = svg("0 0 24 24", <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2.5" fill="none" />)
+export const Pause = svg("0 0 24 24", (
+  <><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></>
+))
+export const Play = svg("0 0 24 24", <path d="M8 5v14l11-7L8 5Z" />)
 export const Wifi = svg("0 0 24 24", (
   <path d="M12 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0-5c1.9 0 3.6.7 4.9 2l-1.7 1.7A4.7 4.7 0 0 0 12 15.3c-1.3 0-2.4.5-3.2 1.4L7.1 15c1.3-1.3 3-2 4.9-2Zm0-5c3.3 0 6.2 1.3 8.3 3.4l-1.7 1.7A9.5 9.5 0 0 0 12 11a9.5 9.5 0 0 0-6.6 2.1L3.7 11.4A11.7 11.7 0 0 1 12 8Z" />
 ))

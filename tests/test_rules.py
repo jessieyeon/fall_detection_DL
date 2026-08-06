@@ -25,4 +25,5 @@ def test_uniform_heatmap_levels_not_high_bias():
     report = rules.analyze_report(hm, rows=3, cols=3, top_n=2)
     # 모든 셀이 같으면 비율 1.0 → 높음. 그래도 findings/summary 형태는 유지.
     assert len(report["findings"]) == 2
-    assert set(report.keys()) == {"findings", "summary", "grid"}
+    # evidence: 권고의 문헌 근거 설명 (docs/낙상-동선-근거.md)
+    assert set(report.keys()) == {"findings", "summary", "grid", "evidence"}
