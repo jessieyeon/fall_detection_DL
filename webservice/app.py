@@ -102,4 +102,9 @@ if os.path.isdir(_DIST):
         # 유지한다(/login, /mypage, /live 새로고침에도 안 깨지게).
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404)
-        return FileResponse(os.path.join(_DIST, "index.html"))
+        # index.html 은 캐시 금지. 번들 파일명(assets/index-XXXX.js)은 빌드마다
+        # 바뀌는 해시라 마음껏 캐시해도 되지만, 그 파일명을 담고 있는 index.html
+        # 이 캐시되면 배포 후에도 브라우저가 옛 번들을 계속 연다 — 새 버전을
+        # 올렸는데 관람객에게 옛 화면이 보이는 사고의 원인이다.
+        return FileResponse(os.path.join(_DIST, "index.html"),
+                            headers={"Cache-Control": "no-cache"})
