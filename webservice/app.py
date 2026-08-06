@@ -102,6 +102,17 @@ if os.path.isdir(_DIST):
         # 유지한다(/login, /mypage, /live 새로고침에도 안 깨지게).
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404)
+
+        # dist 에 실제로 있는 파일(폰트·샘플 영상·데모 영상 등 public/ 산출물)은
+        # 그대로 내보낸다. 이 분기가 없으면 /fonts/*.ttf 요청에 index.html 이
+        # 돌아가 폰트·영상이 배포에서 전부 깨진다. realpath 검사는 ../ 로 dist
+        # 밖을 읽어가는 경로 탈출을 막는다.
+        if full_path:
+            candidate = os.path.realpath(os.path.join(_DIST, full_path))
+            if candidate.startswith(os.path.realpath(_DIST) + os.sep) \
+                    and os.path.isfile(candidate):
+                return FileResponse(candidate)
+
         # index.html 은 캐시 금지. 번들 파일명(assets/index-XXXX.js)은 빌드마다
         # 바뀌는 해시라 마음껏 캐시해도 되지만, 그 파일명을 담고 있는 index.html
         # 이 캐시되면 배포 후에도 브라우저가 옛 번들을 계속 연다 — 새 버전을
