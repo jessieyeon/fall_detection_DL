@@ -1,19 +1,33 @@
-opencv-contrib-python==4.11.0.86
-mediapipe==0.10.14
-face_recognition==1.3.0
-numpy==1.26.4
-pyserial==3.5
-joblib==1.4.2
-scikit-learn==1.5.1
-pandas==2.2.2
-matplotlib==3.9.0
-tabulate==0.9.0
-pytest==8.2.0
-# 모바일 뷰어 앱(--webapp)용. 웹앱을 안 쓰면 설치하지 않아도 된다.
+# 다온 웹 서비스(webservice/) 배포용 의존성.
+#
+# main.py 파이프라인(실시간 낙상 감지, 아두이노, 얼굴인식)만 쓰려면
+# requirements-local.txt 를 설치하세요. 이 파일에는 서버가 실제로 쓰는 것만
+# 담습니다 — 배포 이미지 크기와 빌드 실패 위험을 줄이기 위해서입니다.
+#
+# 설치:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+#
+# --extra-index-url 이 필요한 이유: 기본 PyPI 의 torch 는 CUDA 런타임을 포함해
+# 2GB가 넘습니다. 서버에 GPU가 없으므로 CPU 전용 wheel 을 받으면 ~800MB 로 줄고
+# 무료/저가 인스턴스의 디스크·메모리 한도 안에 들어옵니다.
+
+# --- 웹 서버 ---
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
 websockets==12.0
 itsdangerous==2.2.0
 httpx==0.27.0
-ultralytics==8.4.0
 python-multipart==0.0.9
+
+# --- 컨설팅 분석 (YOLO11 사람 검출) ---
+# headless: 서버에는 GUI가 없다. GUI 빌드(opencv-contrib-python)는 libGL 등
+# 시스템 라이브러리를 요구해서 슬림 이미지에서 임포트가 실패한다.
+opencv-python-headless==4.11.0.86
+ultralytics==8.4.0
+numpy==1.26.4
+
+# mediapipe / joblib / scikit-learn 은 여기 없습니다.
+# 실시간 낙상 감지(main.py)만 쓰고 웹 서비스는 임포트조차 하지 않습니다.
+# webservice/ 의 외부 의존성은 cv2, numpy, fastapi, httpx, pydantic, starlette 뿐입니다.
+# mediapipe 하나만 200MB가 넘어서 서버에서 빼면 이미지가 그만큼 가벼워집니다.
+# 부스 시연용 파이프라인은 requirements-local.txt 로 설치하세요.

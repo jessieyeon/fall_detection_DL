@@ -23,6 +23,10 @@ def env(tmp_path, monkeypatch):
         return hm, np.zeros((30, 30, 3), dtype=np.uint8)
     monkeypatch.setattr("webservice.routes_consulting._analyze", fake_analyze)
 
+    # 업로드 바이트가 진짜 영상이 아니므로 ffmpeg 정규화도 우회한다.
+    monkeypatch.setattr("webservice.routes_consulting._ensure_readable",
+                        lambda path: (path, False))
+
     # 잡을 동기 실행해 테스트를 결정적으로
     def sync_run(job_id, fn):
         from webservice.consulting import jobs

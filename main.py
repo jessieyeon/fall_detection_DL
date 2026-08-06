@@ -184,6 +184,10 @@ def main():
                 fired = tiles.select_tiles(
                     direction_deg, R, lean_ratio, rows, cols,
                     profile.tau_R, profile.tau_R_strict, profile.tau_lean)
+                # 배터리 용량 한계: 한 번에 타일 1장(모터 2개)만 작동한다. 여러 장이
+                # 선택되면 가장 낮은 번호 하나만 남긴다(펌웨어도 같은 규칙이라 에코가 맞음).
+                if len(fired) > 1:
+                    fired = {min(fired)}
 
                 ack = False if args.no_serial else controller.fire(fired)
                 print(f"[낙상 위험] score={frame.risk_score:.2f} "
@@ -191,7 +195,10 @@ def main():
                       f"-> 타일 {sorted(fired)} ({len(fired)}장) ack={ack}")
                 log_event(profile.name, frame.face_name, frame.risk_score,
                           direction_deg, lean_ratio, R, fired, ack)
-                if webapp is not None:
+                # 모터가 실제로 발동(ack)했을 때만 실시간 화면 타일을 빨갛게 한다.
+                # 시뮬레이션/미연결이면 ack=False 라 타일도 안 바뀌어, 화면과 하드웨어가
+                # 어긋나지 않는다.
+                if webapp is not None and ack:
                     webapp.push_fall(sorted(fired), rows, cols, direction_deg)
 
                 active_tiles = fired

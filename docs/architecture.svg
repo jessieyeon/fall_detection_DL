@@ -1,0 +1,158 @@
+<svg viewBox="0 0 980 620" xmlns="http://www.w3.org/2000/svg" role="img" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif">
+<title>낙상 예측 시스템 v4 아키텍처</title>
+<desc>카메라 입력부터 에어쿠션 작동까지의 실시간 추론 흐름과, 4개 데이터셋 기반 학습 흐름</desc>
+
+<style>
+  .box { fill: #ffffff; stroke: #d4d0c8; stroke-width: 1.5; rx: 8; }
+  .box-hi { fill: #fdf6ec; stroke: #d97757; stroke-width: 2; rx: 8; }
+  .box-data { fill: #f7f6f4; stroke: #c9c5bd; stroke-width: 1.5; rx: 8; }
+  .t { font-size: 13px; font-weight: 600; fill: #1f1e1d; }
+  .s { font-size: 10.5px; fill: #6b6862; }
+  .lbl { font-size: 11px; font-weight: 700; fill: #d97757; letter-spacing: .5px; }
+  .arrow { stroke: #a8a49c; stroke-width: 1.6; fill: none; marker-end: url(#a); }
+  .sec { font-size: 12px; font-weight: 700; fill: #8b8680; letter-spacing: 1px; }
+  .note { font-size: 10px; fill: #8b8680; }
+</style>
+<defs>
+  <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#a8a49c"/>
+  </marker>
+</defs>
+
+<!-- ===== 실시간 추론 ===== -->
+<text x="30" y="34" class="sec">실시간 추론 파이프라인 (30 fps, CPU)</text>
+
+<rect x="30" y="52" width="128" height="72" class="box"/>
+<text x="94" y="80" class="t" text-anchor="middle">카메라 입력</text>
+<text x="94" y="98" class="s" text-anchor="middle">RGB 단일 카메라</text>
+<text x="94" y="113" class="s" text-anchor="middle">웨어러블 불필요</text>
+
+<rect x="188" y="52" width="128" height="72" class="box"/>
+<text x="252" y="80" class="t" text-anchor="middle">MediaPipe Pose</text>
+<text x="252" y="98" class="s" text-anchor="middle">33개 관절 + 3D</text>
+<text x="252" y="113" class="s" text-anchor="middle">~10 ms/frame</text>
+
+<rect x="346" y="52" width="150" height="72" class="box-hi"/>
+<text x="421" y="76" class="t" text-anchor="middle">기본 특징 7개</text>
+<text x="421" y="93" class="s" text-anchor="middle">수직·수평 속도, 2D 기울기</text>
+<text x="421" y="107" class="s" text-anchor="middle">기울기 각속도</text>
+<text x="421" y="120" class="s" text-anchor="middle" fill="#d97757">+3D 몸통각·폭높이·어깨</text>
+
+<rect x="526" y="52" width="140" height="72" class="box-hi"/>
+<text x="596" y="76" class="t" text-anchor="middle">시간 윈도우 특징</text>
+<text x="596" y="93" class="s" text-anchor="middle">0.2 / 0.5 / 1.0초</text>
+<text x="596" y="107" class="s" text-anchor="middle">평균·표준편차·범위</text>
+<text x="596" y="120" class="s" text-anchor="middle">기울기·EWMA → 97개</text>
+
+<rect x="696" y="52" width="128" height="72" class="box"/>
+<text x="760" y="80" class="t" text-anchor="middle">HistGradient</text>
+<text x="760" y="96" class="t" text-anchor="middle">Boosting</text>
+<text x="760" y="114" class="s" text-anchor="middle">2.3 ms/frame</text>
+
+<rect x="854" y="52" width="96" height="72" class="box"/>
+<text x="902" y="76" class="t" text-anchor="middle">위험 확률</text>
+<text x="902" y="94" class="s" text-anchor="middle">0.0 ~ 1.0</text>
+<text x="902" y="112" class="s" text-anchor="middle">프레임마다</text>
+
+<path d="M158,88 L186,88" class="arrow"/>
+<path d="M316,88 L344,88" class="arrow"/>
+<path d="M496,88 L524,88" class="arrow"/>
+<path d="M666,88 L694,88" class="arrow"/>
+<path d="M824,88 L852,88" class="arrow"/>
+
+<!-- 두 번째 줄: 후처리 -->
+<path d="M902,124 L902,150 L60,150 L60,172" class="arrow"/>
+
+<rect x="30" y="176" width="150" height="70" class="box-hi"/>
+<text x="105" y="202" class="t" text-anchor="middle">EWMA 평활화</text>
+<text x="105" y="220" class="s" text-anchor="middle">α = 0.4 저역 필터</text>
+<text x="105" y="235" class="s" text-anchor="middle">단발 노이즈 제거</text>
+
+<rect x="210" y="176" width="150" height="70" class="box-hi"/>
+<text x="285" y="202" class="t" text-anchor="middle">지속성 판정</text>
+<text x="285" y="220" class="s" text-anchor="middle">3프레임 연속 초과</text>
+<text x="285" y="235" class="s" text-anchor="middle">임계값 0.10</text>
+
+<rect x="390" y="176" width="150" height="70" class="box"/>
+<text x="465" y="202" class="t" text-anchor="middle">낙상 방향 추정</text>
+<text x="465" y="220" class="s" text-anchor="middle">몸통 이동 벡터</text>
+<text x="465" y="235" class="s" text-anchor="middle">+ 기울기 비율</text>
+
+<rect x="570" y="176" width="150" height="70" class="box"/>
+<text x="645" y="202" class="t" text-anchor="middle">타일 선택</text>
+<text x="645" y="220" class="s" text-anchor="middle">격자 캘리브레이션</text>
+<text x="645" y="235" class="s" text-anchor="middle">쿨다운 게이트</text>
+
+<rect x="750" y="176" width="200" height="70" class="box-hi"/>
+<text x="850" y="202" class="t" text-anchor="middle">에어쿠션 작동</text>
+<text x="850" y="220" class="s" text-anchor="middle">서보 발사 · 알림 전송</text>
+<text x="850" y="235" class="s" text-anchor="middle">평균 0.65~2.8초 선행</text>
+
+<path d="M180,211 L208,211" class="arrow"/>
+<path d="M360,211 L388,211" class="arrow"/>
+<path d="M540,211 L568,211" class="arrow"/>
+<path d="M720,211 L748,211" class="arrow"/>
+
+<line x1="30" y1="290" x2="950" y2="290" stroke="#e5e2dc" stroke-width="1"/>
+
+<!-- ===== 학습 ===== -->
+<text x="30" y="326" class="sec">학습 파이프라인 (오프라인)</text>
+
+<rect x="30" y="344" width="200" height="118" class="box-data"/>
+<text x="130" y="368" class="t" text-anchor="middle">학습 데이터</text>
+<text x="44" y="390" class="s">Le2i — 130영상 · 실내 4개 방</text>
+<text x="44" y="408" class="s">URFD — 70영상 · 낙상30/ADL40</text>
+<text x="44" y="426" class="s">자체 촬영 — 40클립 · 2인</text>
+<text x="44" y="448" class="note">MCF 87영상은 벤치마크 전용</text>
+
+<rect x="262" y="344" width="164" height="118" class="box-data"/>
+<text x="344" y="368" class="t" text-anchor="middle">라벨링 규칙</text>
+<text x="276" y="392" class="s">낙상 직전 1초 = 위험(1)</text>
+<text x="276" y="410" class="s">낙상 구간 ±1초 = 제외</text>
+<text x="276" y="428" class="s">그 외 = 정상(0)</text>
+<text x="276" y="450" class="note">사전 예측이 목표이므로</text>
+
+<rect x="458" y="344" width="164" height="118" class="box-data"/>
+<text x="540" y="368" class="t" text-anchor="middle">데이터 증강</text>
+<text x="472" y="392" class="s">좌우 반전</text>
+<text x="472" y="410" class="s">재생속도 ±15% 워프</text>
+<text x="472" y="428" class="s">자체 데이터 3배 가중</text>
+<text x="472" y="450" class="note">학습 4배 → 16.6만 프레임</text>
+
+<rect x="654" y="344" width="140" height="118" class="box-data"/>
+<text x="724" y="368" class="t" text-anchor="middle">검증 설계</text>
+<text x="666" y="392" class="s">영상 단위 분할</text>
+<text x="666" y="410" class="s">장면 교차 검증</text>
+<text x="666" y="428" class="s">사람 단위 분할</text>
+<text x="666" y="450" class="note">프레임 누수 차단</text>
+
+<rect x="826" y="344" width="124" height="118" class="box-hi"/>
+<text x="888" y="374" class="t" text-anchor="middle">v4 모델</text>
+<text x="888" y="398" class="s" text-anchor="middle">특징 97개</text>
+<text x="888" y="418" class="s" text-anchor="middle">HistGB 400 tree</text>
+<text x="888" y="440" class="s" text-anchor="middle">1.6 MB</text>
+
+<path d="M230,403 L260,403" class="arrow"/>
+<path d="M426,403 L456,403" class="arrow"/>
+<path d="M622,403 L652,403" class="arrow"/>
+<path d="M794,403 L824,403" class="arrow"/>
+
+<!-- 성능 요약 -->
+<rect x="30" y="494" width="920" height="96" rx="8" fill="#faf9f7" stroke="#e5e2dc" stroke-width="1.5"/>
+<text x="48" y="520" class="lbl">최종 성능 — 4개 데이터셋 검증</text>
+<text x="48" y="546" class="t">Le2i 26/26</text>
+<text x="48" y="564" class="s">오경보 4.57 · 선행 2.8초</text>
+<text x="48" y="580" class="note">AUC 0.938</text>
+
+<text x="270" y="546" class="t">URFD 6/6</text>
+<text x="270" y="564" class="s">오경보 2.09 · 선행 0.63초</text>
+<text x="270" y="580" class="note">AUC 0.921</text>
+
+<text x="492" y="546" class="t">자체 15/17</text>
+<text x="492" y="564" class="s">오경보 1.48/클립</text>
+<text x="492" y="580" class="note">사람 단위 교차검증</text>
+
+<text x="714" y="546" class="t">MCF 15/18</text>
+<text x="714" y="564" class="s">학습에 쓰지 않은 외부 벤치마크</text>
+<text x="714" y="580" class="note">8각도 어안 카메라</text>
+</svg>

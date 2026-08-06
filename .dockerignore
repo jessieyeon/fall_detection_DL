@@ -1,0 +1,38 @@
+# 빌드 컨텍스트에서 제외 — 이미지 크기와 빌드 시간을 줄인다.
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.superpowers
+
+# 데이터셋·학습 산출물 (수 GB). 서버는 추론만 한다.
+data/
+model_training/
+runs/
+test_videos/
+*.joblib
+*.pt
+
+# 프런트는 Dockerfile 1단계에서 새로 빌드한다
+webservice/frontend/node_modules/
+webservice/frontend/dist/
+
+# 로컬 상태
+webservice/daon.db
+webservice/consulting/uploads/
+webservice/consulting/reports/
+calibration.json
+fall_risk_log*.csv
+bench/
+
+# 문서·미디어
+docs/
+pictures/
+hardware/
+*.md
+*.jpeg
+*.png
+*.mov
+*.mp4
+.DS_Store

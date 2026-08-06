@@ -11,6 +11,7 @@ const CONNECTIONS: [number, number][] = [
   [23, 25], [25, 27], [24, 26], [26, 28],
 ];
 const LOCATIONS = ["거실", "침실", "주방", "화장실"];
+const FLOOR_TOP = 0.6;   // 타일 바닥 띠 시작 위치(위에서 60% 지점 아래 = 발 밑)
 type LiveState = { landmarks: number[][] | null; tiles: number[]; rows: number; cols: number };
 
 export default function Live() {
@@ -52,12 +53,13 @@ export default function Live() {
         const { width: W, height: H } = cv;
         ctx.clearRect(0, 0, W, H);
         const s = stateRef.current;
-        // 바닥 2x2 타일 격자 — 선명하게. 발사된 타일은 빨강, 각 칸에 번호(0~3).
+        // 바닥 타일 격자 — 화면 아래쪽 바닥 띠(발 밑)에만 그린다. 발사된 타일은 빨강.
+        const floorY = H * FLOOR_TOP, floorH = H - floorY;
         for (let r = 0; r < s.rows; r++)
           for (let c = 0; c < s.cols; c++) {
             const idx = r * s.cols + c;
-            const cwid = W / s.cols, chei = H / s.rows;
-            const x = c * cwid, y = r * chei;
+            const cwid = W / s.cols, chei = floorH / s.rows;
+            const x = c * cwid, y = floorY + r * chei;
             const fired = s.tiles.includes(idx);
             ctx.fillStyle = fired ? "rgba(186,26,26,0.55)" : "rgba(255,255,255,0.07)";
             ctx.fillRect(x, y, cwid, chei);
@@ -110,9 +112,9 @@ export default function Live() {
         </div>
       </div>
 
-      {/* 실시간 피드(타일 + 사람 스켈레톤). 원본 영상과 같은 4:3 비율 */}
+      {/* 실시간 피드(타일 + 사람 스켈레톤). 세로로 긴 9:16 비율 */}
       <div style={{ position: "relative", background: color.black, ...edge(2) }}>
-        <canvas ref={canvasRef} width={640} height={480} style={{ display: "block", width: "100%", height: "auto" }} />
+        <canvas ref={canvasRef} width={480} height={854} style={{ display: "block", width: "100%", height: "auto" }} />
         <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 8 }}>
           <span style={{ display: "flex", alignItems: "center", gap: 6, background: on ? color.red : color.gray, color: color.white, padding: "4px 10px", fontSize: 14, fontWeight: 700, ...edge(2, color.white) }}>
             <span style={{ width: 8, height: 8, borderRadius: 8, background: color.white }} /> {on ? "ON" : "OFF"}

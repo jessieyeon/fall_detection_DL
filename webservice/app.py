@@ -1,6 +1,7 @@
 """다온 웹 서비스 FastAPI 진입점."""
 
 import os
+import threading
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -16,10 +17,38 @@ from webservice.routes_consulting import router as consulting_router
 from webservice.routes_live import router as live_router
 
 app = FastAPI(title="다온 낙상 케어")
+
+# 온라인 전시 사이트가 이 앱을 iframe 으로 임베드한다. 그러면 우리 쿠키는
+# '서드파티 쿠키'가 되어, 기본값(SameSite=lax)에서는 브라우저가 보내지 않는다.
+# → URL 을 직접 열면 로그인이 되는데 iframe 안에서만 안 되는 상황이 생긴다.
+# SameSite=None 으로 풀어야 하고, 그러려면 Secure(=HTTPS)가 필수다.
+# 로컬 개발은 HTTP 라 Secure 쿠키를 못 쓰므로 DAON_EMBED=1 일 때만 켠다.
+_EMBED = os.environ.get("DAON_EMBED", "0") == "1"
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("DAON_SECRET", "dev-demo-secret-change-me"),
+    same_site="none" if _EMBED else "lax",
+    https_only=_EMBED,
 )
+
+
+@app.middleware("http")
+async def _allow_framing(request, call_next):
+    """전시 사이트가 이 앱을 iframe 에 넣을 수 있게 한다.
+
+    X-Frame-Options 는 값이 있으면 무조건 막히므로(ALLOW-FROM 은 폐기됐다)
+    아예 설정하지 않고, 후속 프록시가 붙였을 경우를 대비해 지운다. 대신
+    표준인 CSP frame-ancestors 를 쓴다.
+
+    DAON_FRAME_ANCESTORS 로 특정 도메인만 허용할 수 있다. 기본은 전시 사이트
+    도메인을 아직 모르므로 전체 허용이다.
+    """
+    response = await call_next(request)
+    if "x-frame-options" in response.headers:
+        del response.headers["x-frame-options"]   # MutableHeaders 에는 pop 이 없다
+    response.headers["Content-Security-Policy"] = (
+        "frame-ancestors " + os.environ.get("DAON_FRAME_ANCESTORS", "*"))
+    return response
 app.include_router(auth_router)
 app.include_router(survey_router)
 app.include_router(guardian_router)
@@ -31,6 +60,28 @@ app.include_router(live_router)
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    _warm_yolo()
+
+
+def _warm_yolo():
+    """YOLO 가중치를 미리 읽어둔다(백그라운드 스레드, 실패해도 서버는 뜬다).
+
+    첫 컨설팅 요청이 모델 로딩까지 떠안으면 체감 대기가 몇 초 늘어난다. 서버가
+    뜰 때 미리 해두면 사용자는 추론 시간만 기다린다. DAON_SKIP_WARMUP=1 이면
+    건너뛴다(테스트·개발에서 torch 로딩을 강제하지 않기 위해).
+    """
+    if os.environ.get("DAON_SKIP_WARMUP") == "1":
+        return
+
+    def run():
+        try:
+            from webservice.consulting.analyze import warmup
+            warmup()
+            print("[warmup] YOLO 모델 준비 완료")
+        except Exception as exc:                  # noqa: BLE001 - 워밍업 실패는 치명적이지 않다
+            print(f"[warmup] 건너뜀: {exc}")
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 @app.get("/api/health")

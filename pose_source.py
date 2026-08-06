@@ -6,6 +6,9 @@
 모델 입력 특징 [vy, vx, tilt, tilt_vel] 의 계산 방식은 main.py 에 있던 것을
 그대로 옮긴 것이다. model_training/extract_features.py 와 반드시 일치해야 하며,
 바꾸면 학습/서빙 불일치가 발생한다.
+
+v4 모델은 여기에 3개 특징이 추가된다 (tilt3d_deg, aspect_ratio, shoulder_y).
+정의는 model_training/extract_features_v4.py 와 일치해야 한다.
 """
 
 import math
@@ -39,7 +42,17 @@ class PoseFrame:
     face_name: str
 
 
-def load_risk_model(path="fall_risk_model.joblib"):
+def load_risk_model(path="fall_risk_model.joblib", v2_path="fall_risk_model_v2.joblib",
+                    v3_path="fall_risk_model_v3.joblib", v4_path="fall_risk_model_v4.joblib",
+                    v5_path="fall_risk_model_v5.joblib"):
+    # 최신 버전 우선: v5(도메인불변+의사라벨) > v4(3D) > v3 > v2 > v1 > 속도 임계값
+    for p, ver in ((v5_path, "v5"), (v4_path, "v4"), (v3_path, "v3"), (v2_path, "v2")):
+        if os.path.isfile(p):
+            bundle = joblib.load(p)
+            print(f"낙상 위험 모델 {ver} 로드됨 (threshold={bundle['prob_threshold']}, "
+                  f"persistence={bundle['persistence']} 값은 참고용이며, "
+                  "실제로는 프로파일(profiles.json) 값으로 덮어써서 사용합니다)")
+            return bundle
     if not os.path.isfile(path):
         print(f"경고: {path} 가 없습니다 - 단일 수직속도 임계값"
               f"({VELOCITY_THRESHOLD})으로 대체합니다.")
@@ -112,22 +125,49 @@ class PoseSource:
         self._frame_index = 0
         self._face_name = "unknown"
 
+        # v2 번들이면 시간 특징 스코어러를 만든다 (학습/서빙 일치는 temporal_risk.py 가 보장)
+        self._v2_scorer = None
+        self._scorer_version = 1
+        if model_bundle is not None and model_bundle.get("version", 1) >= 2:
+            from temporal_risk import TemporalRiskScorer
+            self._v2_scorer = TemporalRiskScorer(model_bundle)
+            self._scorer_version = model_bundle.get("version", 2)
+
     def _detect_pose(self, frame):
+        """(그려진 이미지, 픽셀 랜드마크, v4 추가특징) 을 돌려준다.
+        추가특징은 model_training/extract_features_v4.py 의 정의와 반드시 일치해야 한다."""
         drawn = frame.copy()
         results = self._pose.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if not results.pose_landmarks:
-            return drawn, None
+            return drawn, None, None
 
         height, width, _ = frame.shape
+        lms = results.pose_landmarks.landmark
         landmarks = [
             (int(lm.x * width), int(lm.y * height), lm.z * width)
-            for lm in results.pose_landmarks.landmark
+            for lm in lms
         ]
         for start, end in mp.solutions.pose.POSE_CONNECTIONS:
             cv2.line(drawn,
                      (landmarks[start][0], landmarks[start][1]),
                      (landmarks[end][0], landmarks[end][1]), (0, 255, 0), 3)
-        return drawn, landmarks
+
+        # --- v4 추가 특징 ---
+        xs = [p.x for p in lms]
+        ys = [p.y for p in lms]
+        aspect = ((max(xs) - min(xs)) * width) / (((max(ys) - min(ys)) * height) + 1e-6)
+        shoulder_y = (lms[L_SHOULDER].y + lms[R_SHOULDER].y) / 2.0
+        # 3D 몸통 각도: world landmarks 는 미터 단위 체중심 좌표계라 카메라 축 방향
+        # (전/후방) 기울기도 잡힌다. 2D tilt 는 이 성분을 전혀 못 본다.
+        tilt3d = None
+        if results.pose_world_landmarks:
+            wl = results.pose_world_landmarks.landmark
+            dx = (wl[L_HIP].x + wl[R_HIP].x) / 2 - (wl[L_SHOULDER].x + wl[R_SHOULDER].x) / 2
+            dy = (wl[L_HIP].y + wl[R_HIP].y) / 2 - (wl[L_SHOULDER].y + wl[R_SHOULDER].y) / 2
+            dz = (wl[L_HIP].z + wl[R_HIP].z) / 2 - (wl[L_SHOULDER].z + wl[R_SHOULDER].z) / 2
+            tilt3d = math.degrees(math.atan2(math.hypot(dx, dz), abs(dy) + 1e-9))
+        extra = {"aspect": aspect, "shoulder_y": shoulder_y, "tilt3d": tilt3d}
+        return drawn, landmarks, extra
 
     def _reset_history(self):
         """추적을 놓쳤을 때 오래된 운동 정보가 다음 낙상에 섞이지 않게 비운다."""
@@ -136,6 +176,8 @@ class PoseSource:
         self._prev_center = None
         self._prev_tilt = None
         self._prev_time = None
+        if self._v2_scorer is not None:
+            self._v2_scorer.reset()
 
     def _now(self):
         if self._is_file:
@@ -161,7 +203,7 @@ class PoseSource:
 
             self._frame_index += 1
             height, width, _ = frame.shape
-            image, landmarks = self._detect_pose(frame)
+            image, landmarks, extra = self._detect_pose(frame)
             face_name = self._maybe_recognize_face(frame)
             now = self._now()
 
@@ -192,7 +234,19 @@ class PoseSource:
                 if dt > 0:
                     tilt_vel = (tilt - self._prev_tilt) / dt
 
-            if self.model_bundle is not None:
+            if self._v2_scorer is not None:
+                if self._scorer_version >= 4:
+                    tilt3d = extra["tilt3d"]
+                    if tilt3d is None:      # world landmarks 미제공 프레임 - 2D 로 대체
+                        tilt3d = tilt
+                    risk_score = self._v2_scorer.update(
+                        vy, vx, tilt, tilt_vel,
+                        tilt3d=tilt3d, aspect=extra["aspect"],
+                        shoulder_y=extra["shoulder_y"])
+                else:
+                    risk_score = self._v2_scorer.update(vy, vx, tilt, tilt_vel)
+                is_risky = risk_score >= self.prob_threshold
+            elif self.model_bundle is not None:
                 risk_score = self.model_bundle["model"].predict_proba(
                     [[vy, vx, tilt, tilt_vel]])[0][1]
                 is_risky = risk_score >= self.prob_threshold

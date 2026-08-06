@@ -33,6 +33,9 @@ def test_hazard_boxes_marks_cell_red(tmp_path):
     heatmap.render_hazard_boxes(frame, findings, 3, 3, out)
     img = cv2.imread(out)
     assert img is not None and img.shape == (30, 30, 3)
-    # 좌상단(위험 셀)에는 빨강(BGR R>100)이 칠해지고, 우하단은 그대로 검정
-    assert img[3, 3][2] > 100
+    # 좌상단(위험 셀)에는 빨강이 칠해지고, 우하단은 그대로 검정.
+    # 셀 안쪽 픽셀을 찍는다 — 테두리 픽셀은 cv2 버전에 따라 굵기 오프셋이
+    # 달라서 좌표가 한두 픽셀씩 어긋난다.
+    b, g, r = img[5, 5]
+    assert r > 50 and r > b and r > g        # 반투명(0.25) 빨강 채움
     assert img[27, 27].sum() < 30
