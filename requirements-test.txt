@@ -1,0 +1,19 @@
+# 테스트를 돌리는 데 필요한 최소 의존성.
+#
+# requirements.txt 를 통째로 깔면 torch·ultralytics 가 따라와 CI 가 몇 분씩
+# 걸리고 캐시도 잘 안 먹는다. 테스트는 YOLO 를 monkeypatch 로 대체하므로
+# 무거운 추론 스택 없이 돈다 — 대신 웹 계층과 영상 처리 계층은 진짜를 쓴다.
+#
+# 이 목록으로 tests/ 950건이 전부 통과하는 것을 확인했다.
+# 새 테스트가 다른 패키지를 import 하면 여기에 추가할 것. 빠뜨리면 CI 가
+# 수집 단계에서 죽고, Railway 의 Wait for CI 가 배포를 통째로 건너뛴다.
+
+pytest
+
+fastapi                  # TestClient, 라우트
+python-multipart         # 파일 업로드(UploadFile) 파싱
+itsdangerous             # SessionMiddleware 쿠키 서명
+httpx                    # TestClient 내부 + 병원 API 목 트랜스포트
+
+numpy                    # 히트맵·동선 배열
+opencv-python-headless   # 렌더링·영상 디코딩 (headless: GUI 라이브러리 불필요)

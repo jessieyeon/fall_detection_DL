@@ -2,6 +2,12 @@ name: tests
 
 # main 에 푸시될 때(병합 후 확인)와 모든 PR 에서 단위 테스트를 돌린다.
 # pull_request 이벤트가 PR 브랜치의 push 를 대신 커버하므로 중복 실행되지 않는다.
+#
+# ⚠️ 이 워크플로가 실패하면 배포가 멈춘다.
+# Railway 의 "Wait for CI" 가 켜져 있으면, 실패한 커밋의 배포는 SKIPPED 로
+# 처리되고 Deployments 목록에서도 기본으로 숨겨진다. 빌드가 빨갛게 실패하는
+# 게 아니라 **아무 일도 안 일어난 것처럼 보이므로** 알아채기 어렵다.
+# 실제로 이것 때문에 두 커밋이 배포되지 않은 채 며칠이 지났다.
 on:
   push:
     branches: [main]
@@ -10,28 +16,34 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.9", "3.11"]
 
+    # 배포 이미지(python:3.11-slim)와 같은 버전 하나만 돌린다.
+    # 예전에는 3.9 도 함께 돌렸지만, 서비스가 실제로 도는 곳은 3.11 뿐이라
+    # 3.9 전용 실패가 배포를 막는 것은 얻는 것 없이 위험만 늘리는 일이다.
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
 
-      # 수집되는 테스트(tests/test_tiles.py, test_tile_protocol.py, test_config.py)는
-      # tiles / tile_protocol / config 만 import 하고, 이들은 표준 라이브러리로만
-      # 동작한다. mediapipe·opencv·dlib 등 무거운 런타임 의존성은 테스트에 필요
-      # 없으므로 requirements.txt 를 통째로 깔지 않고 pytest 만 설치해 빠르고
-      # 안정적으로 유지한다.
+      # requirements.txt 가 아니라 requirements-test.txt 를 쓴다.
+      # 전자는 torch·ultralytics 를 끌고 와 CI 가 몇 분씩 걸린다 —
+      # 테스트는 YOLO 를 monkeypatch 로 대체하므로 필요 없다.
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-test.txt
 
       # `python -m pytest` 로 실행해야 현재 작업 디렉터리(레포 루트)가 sys.path 에
       # 들어가 루트의 tiles.py 등이 import 된다. 맨 `pytest` 로는 import 에러가 난다.
+      #
+      # DAON_SKIP_WARMUP: 앱 기동 시 YOLO 가중치를 미리 읽는 워밍업을 건너뛴다.
+      # 실패해도 서버는 뜨지만(예외를 삼킨다) CI 에서 굳이 시도할 이유가 없다.
       - name: Run unit tests
+        env:
+          DAON_SKIP_WARMUP: "1"
         run: python -m pytest tests/ -q
