@@ -4,6 +4,7 @@ import { Video, Wifi, Alert, MapPin, Pause, Play } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
+import SelfCam from "./SelfCam";
 
 /**
  * 데모 영상 경로. 영상 파일은 별도 제공 예정이므로 경로만 상수로 둔다.
@@ -29,7 +30,7 @@ const showDiag = import.meta.env.DEV ||
   new URLSearchParams(window.location.search).get("diag") === "1";
 
 type LiveState = { landmarks: number[][] | null; tiles: number[]; rows: number; cols: number };
-type Stage = "idle" | "searching" | "none" | "demo";
+type Stage = "idle" | "searching" | "none" | "demo" | "self";
 
 /** 감지 파이프라인이 붙어 있는지 확인 — WebSocket 으로 포즈가 들어오는지 본다.
  *
@@ -213,6 +214,15 @@ export default function Live() {
   const [pendingPause, setPendingPause] = useState<boolean | null>(null);
   const [controlError, setControlError] = useState("");
   const [, setTick] = useState(0);
+  // '내 카메라 체험' 가능 여부. 서버에 모델이 없으면 버튼 자체를 숨긴다.
+  const [selfAvailable, setSelfAvailable] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/live/self/available")
+      .then((r) => r.json())
+      .then((d) => setSelfAvailable(!!d.available))
+      .catch(() => {});
+  }, []);
 
   const diag = useServerStatus();
   const paused = pendingPause ?? diag.paused;
@@ -300,8 +310,15 @@ export default function Live() {
           <Button big onClick={connect} icon={<Video size={17} color={color.white} />}>
             {on ? "실시간 화면 보기" : "카메라 연결"}
           </Button>
+          {selfAvailable && !on && (
+            <Button variant="ghost" onClick={() => setStage("self")}>
+              지금 이 기기 카메라로 체험하기
+            </Button>
+          )}
         </Card>
       )}
+
+      {stage === "self" && <SelfCam onExit={() => setStage("idle")} />}
 
       {stage === "searching" && (
         <Card style={{
@@ -329,15 +346,28 @@ export default function Live() {
                   연결할 수 있는 카메라가 없습니다
                 </div>
                 <p style={{ margin: "6px 0 0", fontSize: font.small, color: color.inkSoft, lineHeight: 1.7 }}>
-                  온라인 체험에서는 실제 카메라를 연결할 수 없습니다.
+                  지금은 온라인 체험이라 집에 설치된 카메라가 연결되어 있지 않습니다.
                   <br />
-                  <b style={{ color: color.ink }}>전시 부스에 방문하시면 실시간 낙상 감지와
-                  충격 완화 타일 작동을 직접 체험하실 수 있습니다.</b>
+                  {selfAvailable ? (
+                    <b style={{ color: color.ink }}>대신 지금 보고 계신 기기의 카메라로
+                    낙상 감지를 직접 체험해 보실 수 있습니다.</b>
+                  ) : (
+                    <b style={{ color: color.ink }}>전시 부스에 방문하시면 실시간 낙상 감지와
+                    충격 완화 타일 작동을 직접 체험하실 수 있습니다.</b>
+                  )}
                 </p>
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button onClick={() => setStage("demo")} icon={<Video size={16} color={color.white} />}>
+              {selfAvailable && (
+                <Button onClick={() => setStage("self")}
+                        icon={<Video size={16} color={color.white} />}>
+                  내 카메라로 체험하기
+                </Button>
+              )}
+              <Button variant={selfAvailable ? "ghost" : undefined}
+                      onClick={() => setStage("demo")}
+                      icon={selfAvailable ? undefined : <Video size={16} color={color.white} />}>
                 데모 영상 보기
               </Button>
               <Button variant="ghost" onClick={() => setStage("idle")}>다시 시도</Button>
@@ -350,7 +380,9 @@ export default function Live() {
                 아래 URL 파라미터(?diag=1)로 켤 수 있다. */}
             {showDiag && (
             <details style={{ fontSize: font.caption, color: color.inkFaint }}>
-              <summary style={{ cursor: "pointer" }}>연결 상태 자세히</summary>
+              <summary style={{ cursor: "pointer" }}>
+                연결 진단 (운영자용 — 관람객에게는 보이지 않습니다)
+              </summary>
               <div style={{
                 marginTop: 8, padding: 12, background: color.bg,
                 borderRadius: radius.md, display: "flex",
@@ -374,10 +406,12 @@ export default function Live() {
             )}
           </Card>
 
+          <HowItConnects />
+
           <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <MapPin size={16} color={color.brand} />
             <span style={{ fontSize: font.small, color: color.ink }}>
-              부스에서는 카메라·아두이노 타일이 실제로 작동합니다.
+              전시 부스에서는 카메라와 충격 완화 타일이 실제로 작동합니다.
             </span>
           </Card>
         </>
@@ -520,6 +554,48 @@ export default function Live() {
         </>
       )}
     </AppShell>
+  );
+}
+
+/** 카메라가 어떻게 붙는지에 대한 설명. 관람객이 가장 많이 묻는 질문("와이파이인가요?
+ *  블루투스인가요? 선을 꽂나요?")이라 '연결 실패' 화면에 붙여 둔다.
+ *  개발 용어(WebSocket·파이프라인·포트·서버)는 한 글자도 쓰지 않는다. */
+function HowItConnects() {
+  const steps = [
+    { n: "1", t: "카메라를 집 와이파이에 연결합니다",
+      d: "다온 카메라는 인터넷(와이파이)으로 연결됩니다. 블루투스나 컴퓨터에 꽂는 선은 필요하지 않습니다." },
+    { n: "2", t: "카메라가 자세만 읽어 보냅니다",
+      d: "촬영된 영상은 집 밖으로 나가지 않습니다. AI가 알아본 관절 위치(자세)만 전달됩니다." },
+    { n: "3", t: "이 화면에 자동으로 나타납니다",
+      d: "연결된 카메라는 따로 설정하지 않아도 목록에 뜹니다. 앱에서 언제든 연결을 끊을 수 있습니다." },
+  ];
+  return (
+    <Card style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <b style={{ fontSize: font.h2 }}>카메라는 어떻게 연결되나요?</b>
+      {steps.map((s) => (
+        <div key={s.n} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+          <span style={{
+            width: 24, height: 24, flexShrink: 0, borderRadius: "50%",
+            background: color.brandTint, color: color.brand,
+            fontSize: font.caption, fontWeight: 700,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>{s.n}</span>
+          <div>
+            <div style={{ fontSize: font.small, fontWeight: 700 }}>{s.t}</div>
+            <div style={{ fontSize: font.caption, color: color.inkSoft, lineHeight: 1.6 }}>
+              {s.d}
+            </div>
+          </div>
+        </div>
+      ))}
+      <div style={{
+        fontSize: font.caption, color: color.inkSoft, lineHeight: 1.6,
+        paddingTop: 10, borderTop: `1px solid ${color.line}`,
+      }}>
+        바닥에 까는 <b>충격 완화 타일</b>은 카메라와 짧은 선으로 이어집니다.
+        낙상이 감지되면 넘어지는 방향의 타일이 즉시 펴집니다.
+      </div>
+    </Card>
   );
 }
 
