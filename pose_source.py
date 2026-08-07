@@ -12,7 +12,6 @@ v4 모델은 여기에 3개 특징이 추가된다 (tilt3d_deg, aspect_ratio, sh
 """
 
 import math
-import contextlib
 import os
 from collections import deque
 from dataclasses import dataclass
@@ -23,6 +22,7 @@ import joblib
 import mediapipe as mp
 
 import tiles
+from numpy_compat import bitgen_compat
 
 SMOOTHING_WINDOW = 3        # 랜드마크 지터를 줄이려고 평균낼 프레임 수
 VELOCITY_THRESHOLD = 1.2    # 모델 파일이 없을 때만 쓰는 옛 단일 임계값
@@ -43,99 +43,6 @@ class PoseFrame:
     face_name: str
 
 
-_BITGEN_COMPAT_CACHE = {}
-
-
-def _compat_bitgen_class(cls):
-    """상태를 튜플로 받아도 복원되는 BitGenerator 서브클래스.
-
-    numpy 2.x 는 난수 생성기 상태를 `(state_dict, SeedSequence)` 튜플로 저장하는데
-    numpy 1.x 의 `__setstate__` 는 dict 만 받는다. 앞의 dict 만 넘겨주면 된다
-    (SeedSequence 는 재현용 메타데이터라 학습이 끝난 모델의 추론에는 쓰이지 않는다).
-    """
-    if cls not in _BITGEN_COMPAT_CACHE:
-        class _Compat(cls):
-            def __setstate__(self, state):
-                if isinstance(state, tuple):
-                    state = state[0]
-                super().__setstate__(state)
-
-        _Compat.__name__ = cls.__name__
-        _BITGEN_COMPAT_CACHE[cls] = _Compat
-    return _BITGEN_COMPAT_CACHE[cls]
-
-
-@contextlib.contextmanager
-def _numpy_bitgen_compat():
-    """numpy 버전이 다른 환경에서 저장한 모델도 읽을 수 있게 한다.
-
-    sklearn 모델에는 난수 생성기(BitGenerator)가 함께 피클된다. numpy 2.x 와 1.x 는
-    이걸 저장하는 방식이 달라서, numpy 2.x 로 학습한 모델을 numpy 1.x 로 읽으면
-    이렇게 터진다.
-
-        ValueError: <class 'numpy.random._pcg64.PCG64'> is not a known BitGenerator
-
-    mediapipe 0.10.14 가 numpy<2 를 요구해서 numpy 를 올릴 수 없고, 모델을 다시
-    학습하는 것도 과하다. 복원 함수 세 개를 감싸 차이를 흡수한다.
-
-      · 클래스나 인스턴스가 오면 이름 문자열로 바꿔 넘긴다
-      · 상태가 튜플이면 앞의 dict 만 쓴다 (_compat_bitgen_class)
-
-    `__randomstate_ctor` / `__generator_ctor` 까지 함께 바꾸는 이유: 두 함수는
-    `bit_generator_ctor=__bit_generator_ctor` 를 **기본 인자로** 받는데, 기본 인자는
-    모듈 임포트 시점에 원본 함수로 묶여버린다. 모듈 속성만 갈아끼우면 이들은 여전히
-    원본을 호출해서 패치가 먹지 않는다.
-
-    **읽는 동안만** 적용하고 반드시 되돌린다. 영구히 갈아끼우면 이번엔 저장이
-    깨진다 — 피클러가 교체된 로컬 함수를 참조하려다 실패한다
-    (`Can't pickle local object`). 학습 스크립트가 같은 프로세스에서 모델을 저장할
-    수도 있으므로 전역 상태를 남기지 않는다.
-
-    문자열·dict 로 저장된 기존 모델도 그대로 동작하므로 양방향 모두 안전하다.
-    """
-    try:
-        import numpy as np
-        from numpy.random import _pickle as np_pickle
-    except ImportError:
-        yield
-        return
-
-    saved = {name: getattr(np_pickle, name, None) for name in
-             ("__bit_generator_ctor", "__randomstate_ctor", "__generator_ctor")}
-    orig_bg = saved["__bit_generator_ctor"]
-    if orig_bg is None:
-        yield
-        return
-
-    def _name_of(x):
-        if isinstance(x, str):
-            return x
-        return getattr(x, "__name__", None) or type(x).__name__
-
-    def bit_generator_ctor(bit_generator="MT19937"):
-        name = _name_of(bit_generator)
-        cls = np_pickle.BitGenerators.get(name)
-        return _compat_bitgen_class(cls)() if cls is not None else orig_bg(name)
-
-    def randomstate_ctor(bit_generator_name="MT19937",
-                         bit_generator_ctor=bit_generator_ctor):
-        return np.random.RandomState(bit_generator_ctor(bit_generator_name))
-
-    def generator_ctor(bit_generator_name="MT19937",
-                       bit_generator_ctor=bit_generator_ctor):
-        return np.random.Generator(bit_generator_ctor(bit_generator_name))
-
-    np_pickle.__bit_generator_ctor = bit_generator_ctor
-    np_pickle.__randomstate_ctor = randomstate_ctor
-    np_pickle.__generator_ctor = generator_ctor
-    try:
-        yield
-    finally:
-        for name, fn in saved.items():
-            if fn is not None:
-                setattr(np_pickle, name, fn)
-
-
 def load_risk_model(path="fall_risk_model.joblib", v2_path="fall_risk_model_v2.joblib",
                     v3_path="fall_risk_model_v3.joblib", v4_path="fall_risk_model_v4.joblib",
                     v5_path="fall_risk_model_v5.joblib"):
@@ -144,7 +51,7 @@ def load_risk_model(path="fall_risk_model.joblib", v2_path="fall_risk_model_v2.j
         if not os.path.isfile(p):
             continue
         try:
-            with _numpy_bitgen_compat():
+            with bitgen_compat():
                 bundle = joblib.load(p)
         except Exception as exc:      # noqa: BLE001 - 한 버전이 깨져도 다음 걸로 간다
             # 모델 하나를 못 읽는다고 파이프라인 전체가 죽으면 안 된다.
@@ -159,7 +66,7 @@ def load_risk_model(path="fall_risk_model.joblib", v2_path="fall_risk_model_v2.j
               f"({VELOCITY_THRESHOLD})으로 대체합니다.")
         return None
     try:
-        with _numpy_bitgen_compat():
+        with bitgen_compat():
             bundle = joblib.load(path)
     except Exception as exc:          # noqa: BLE001
         print(f"경고: {path} 를 읽을 수 없습니다 ({type(exc).__name__}: {exc}) - "
