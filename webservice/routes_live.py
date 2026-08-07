@@ -7,12 +7,13 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSock
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from webservice import live
+from webservice import live, live_self
 
 router = APIRouter()
 manager = live.ConnectionManager()
 frames = live.FrameStore()
 control = live.CameraControl()
+self_limiter = live_self.SessionLimiter()
 
 _VALID_TYPES = {"pose", "fall", "reset"}
 _REQUIRED = {"pose": ("landmarks",), "fall": ("tiles", "rows", "cols"), "reset": ()}
@@ -46,6 +47,55 @@ async def ws_live(websocket: WebSocket):
         pass
     finally:
         manager.disconnect(websocket)
+
+
+@router.get("/api/live/self/available")
+def self_available():
+    """'내 카메라 체험'이 가능한지. 프런트가 버튼 노출 여부를 정할 때 쓴다."""
+    ok = live_self.load_bundle() is not None
+    return {"available": ok,
+            "slots": max(0, self_limiter.limit - self_limiter.active) if ok else 0}
+
+
+@router.websocket("/ws/live/self")
+async def ws_live_self(websocket: WebSocket):
+    """관람객 기기 카메라 체험. 브라우저가 포즈 랜드마크를 보내면 낙상 판정을
+    돌려준다. 영상 픽셀은 오지 않는다 — 좌표 33개(프레임당 ~1KB)뿐이다.
+
+    수용 한도(기본 3세션)를 넘으면 busy 를 알리고 닫는다. 세션마다 프레임당
+    모델 추론이 돌기 때문에 무제한으로 받으면 전체 서비스가 밀린다.
+    """
+    if websocket.session.get("user") is None:
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+
+    bundle = live_self.load_bundle()
+    if bundle is None:
+        await websocket.send_json({"type": "unavailable"})
+        await websocket.close()
+        return
+    if not self_limiter.acquire():
+        await websocket.send_json({"type": "busy"})
+        await websocket.close()
+        return
+
+    session = live_self.SelfSession(bundle)
+    await websocket.send_json({"type": "ready",
+                               "persistence": session.persistence,
+                               "rows": session.rows, "cols": session.cols})
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            lm = msg.get("lm")
+            if lm is not None and len(lm) != 33:
+                continue                    # MediaPipe Pose 는 항상 33개
+            for event in session.process(msg):
+                await websocket.send_json(event)
+    except Exception:
+        pass
+    finally:
+        self_limiter.release()
 
 
 @router.post("/api/live/event")
