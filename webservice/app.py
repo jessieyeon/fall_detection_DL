@@ -2,13 +2,14 @@
 
 import os
 import threading
+import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from webservice import db
+from webservice import db, metrics
 from webservice.routes_auth import router as auth_router
 from webservice.routes_survey import router as survey_router
 from webservice.routes_guardian import router as guardian_router
@@ -44,6 +45,19 @@ app.add_middleware(
     same_site="none" if _EMBED else "lax",
     https_only=_EMBED,
 )
+
+
+@app.middleware("http")
+async def _count_requests(request, call_next):
+    """요청 수·상태코드·느린 요청을 센다. /api/metrics 가 이걸 보여준다.
+
+    전시 중에 "서버가 버티고 있나"를 물으면 지금은 답할 방법이 없다. 카운터는
+    메모리에만 있고 요청당 비용은 잠금 한 번이라 부하에 영향을 주지 않는다.
+    """
+    started = time.monotonic()
+    response = await call_next(request)
+    metrics.counter.record(response.status_code, time.monotonic() - started)
+    return response
 
 
 @app.middleware("http")
@@ -101,6 +115,27 @@ def _warm_yolo():
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/metrics")
+def get_metrics():
+    """전시 중 부하 확인용. 개인정보는 없고 카운터만 있다.
+
+    live 항목의 이름·값은 /api/live/status 와 같아야 한다 — 두 엔드포인트가 다른
+    숫자를 말하면 어느 쪽도 믿을 수 없다.
+    """
+    from webservice import routes_live
+    from webservice.consulting import jobs
+
+    m = metrics.counter.snapshot()
+    m["jobs"] = jobs.stats()
+    m["live"] = {
+        "self_sessions": routes_live.self_limiter.active,
+        "self_max": routes_live.self_limiter.limit,
+        "viewers": len(routes_live.manager._clients),
+        "frames": routes_live.frames.seq,
+    }
+    return m
 
 
 # 빌드된 React SPA 를 같은 서버에서 서빙한다(단일 서버 시연). dist 가 없으면
