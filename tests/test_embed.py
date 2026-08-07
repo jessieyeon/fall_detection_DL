@@ -47,6 +47,7 @@ def test_embed_mode_uses_samesite_none(monkeypatch, tmp_path):
     """iframe 안에서 세션 쿠키가 살아남으려면 SameSite=None; Secure 여야 한다."""
     monkeypatch.setenv("DAON_SKIP_WARMUP", "1")
     monkeypatch.setenv("DAON_EMBED", "1")
+    monkeypatch.setenv("DAON_SECRET", "real-secret-for-test")
     monkeypatch.setattr("webservice.db.DB_PATH", os.path.join(tmp_path, "t.db"))
     from webservice import app as app_module
     mod = importlib.reload(app_module)

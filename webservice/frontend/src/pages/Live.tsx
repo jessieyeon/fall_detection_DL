@@ -23,6 +23,11 @@ const CONNECTIONS: [number, number][] = [
 const LOCATIONS = ["거실", "침실", "주방", "화장실"];
 const FLOOR_TOP = 0.6;
 
+/** 연결 진단 패널을 보여줄지. 개발 서버이거나 ?diag=1 을 붙였을 때만 켠다.
+ *  부스 노트북에서 배포 빌드를 그대로 쓰면서 진단이 필요할 때가 있어 뒷문을 남긴다. */
+const showDiag = import.meta.env.DEV ||
+  new URLSearchParams(window.location.search).get("diag") === "1";
+
 type LiveState = { landmarks: number[][] | null; tiles: number[]; rows: number; cols: number };
 type Stage = "idle" | "searching" | "none" | "demo";
 
@@ -338,7 +343,12 @@ export default function Live() {
               <Button variant="ghost" onClick={() => setStage("idle")}>다시 시도</Button>
             </div>
 
-            {/* 개발·현장 진단. 무엇 때문에 못 붙었는지 화면에서 바로 보이게 한다. */}
+            {/* 개발·현장 진단. 무엇 때문에 못 붙었는지 화면에서 바로 보이게 한다.
+                프로덕션 번들에서는 감춘다 — 온라인 관람객에게는 "uvicorn 이 8000
+                포트에서 도는지 확인하세요" 같은 문장이 의미가 없고, 잘 만든 체험이
+                갑자기 미완성처럼 보인다. 부스 노트북에서는 dev 서버로 띄우거나
+                아래 URL 파라미터(?diag=1)로 켤 수 있다. */}
+            {showDiag && (
             <details style={{ fontSize: font.caption, color: color.inkFaint }}>
               <summary style={{ cursor: "pointer" }}>연결 상태 자세히</summary>
               <div style={{
@@ -361,6 +371,7 @@ export default function Live() {
                 </div>
               </div>
             </details>
+            )}
           </Card>
 
           <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "center" }}>

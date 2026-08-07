@@ -20,6 +20,15 @@ bench/
 *.mov
 *.mp4
 iframe_test.html
+
+# ── 위 *.mp4 제외에서 되살릴 것 ──────────────────────────────────────────
+# 체험용 샘플 영상과 실시간 데모 영상은 **앱이 서빙하는 콘텐츠**다.
+# Railway 는 git 저장소를 받아 이미지를 만들기 때문에, 커밋되지 않으면
+# 몇 번을 재배포해도 서버에 도착하지 않는다 — 화면에는 계속 '준비 중'이 뜬다.
+# (.dockerignore 에는 같은 취지의 negation 이 이미 있다.)
+!webservice/frontend/public/samples/*.mp4
+!webservice/frontend/public/demo/*.mp4
+!webservice/consulting/samples/**
 fall_risk_model_v2.joblib
 fall_risk_model_v3.joblib
 fall_risk_model_v4.joblib

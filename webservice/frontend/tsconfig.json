@@ -11,6 +11,9 @@
     "isolatedModules": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
+    // import.meta.env (vite 가 빌드 시 치환하는 값들) 의 타입.
+    // 없으면 `import.meta.env.DEV` 가 tsc 에서 TS2339 로 걸린다.
+    "types": ["vite/client"],
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },

@@ -24,9 +24,23 @@ app = FastAPI(title="다온 낙상 케어")
 # SameSite=None 으로 풀어야 하고, 그러려면 Secure(=HTTPS)가 필수다.
 # 로컬 개발은 HTTP 라 Secure 쿠키를 못 쓰므로 DAON_EMBED=1 일 때만 켠다.
 _EMBED = os.environ.get("DAON_EMBED", "0") == "1"
+
+# 세션 쿠키 서명 키. 이 값이 공개 저장소에 적힌 기본값 그대로면 누구나 로그인
+# 쿠키를 위조할 수 있다. 로컬 개발까지 막으면 불편하므로, 임베드 모드
+# (=배포 환경. HTTPS 와 SameSite=None 이 필요한 그 모드다)일 때만 기동을
+# 거부한다. 경고 로그는 아무도 안 읽으므로 기동 실패로 낸다 —
+# 전시 서버가 기본 시크릿으로 뜨는 것보다 배포가 실패하는 편이 낫다.
+DEFAULT_SECRET = "dev-demo-secret-change-me"
+_SECRET = os.environ.get("DAON_SECRET") or DEFAULT_SECRET
+if _EMBED and _SECRET == DEFAULT_SECRET:
+    raise RuntimeError(
+        "DAON_SECRET 이 기본값입니다. 배포(DAON_EMBED=1) 에서는 실제 값을 "
+        "설정해야 합니다.  예: DAON_SECRET=$(python3 -c "
+        "'import secrets;print(secrets.token_urlsafe(32))')")
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("DAON_SECRET", "dev-demo-secret-change-me"),
+    secret_key=_SECRET,
     same_site="none" if _EMBED else "lax",
     https_only=_EMBED,
 )
