@@ -35,6 +35,25 @@ SLOPE_COLS_V4 = ("tilt_angle_deg", "vertical_velocity", "tilt3d_deg", "aspect_ra
 # (DAFD, IEEE TNSRE 2021 의 domain-adaptive 아이디어를 배포 가능한 형태로 구현)
 REL_SRC_V5 = ["tilt3d_deg", "aspect_ratio", "shoulder_y", "tilt_angle_deg"]
 
+# v6: 카메라 거리 불변 파생 특징. 카메라가 멀어지면 사람이 작게 잡혀 같은 낙상이
+# 느린 속도로 기록되는데, 몸통 길이로 나누면 그 의존이 사라진다.
+BASE_V6 = BASE_V4 + ["vy_torso", "vx_torso", "hip_h", "torso_ratio"]
+
+# 0 나눗셈 하한. model_training/train_v6.py 의 MIN_TORSO/MIN_BODY 와 **같아야 한다**.
+MIN_TORSO, MIN_BODY = 0.02, 0.05
+
+
+def derive_v6(vy, vx, torso_n, body_n, hip_y, ankle_y):
+    """train_v6.add_normalized 의 한 행짜리 판. 두 구현은 반드시 같은 값을 내야 한다.
+
+    학습과 서빙이 갈라지면 예외 없이 확률만 이상해져서 찾기가 매우 어렵다.
+    tests/test_temporal_risk_v6.py 가 두 구현을 직접 비교해 고정한다.
+    """
+    t = max(torso_n, MIN_TORSO)
+    b = max(body_n, MIN_BODY)
+    return {"vy_torso": vy / t, "vx_torso": vx / t,
+            "hip_h": (ankle_y - hip_y) / b, "torso_ratio": t / b}
+
 
 class _Ewma:
     """pandas Series.ewm(alpha=a, adjust=True).mean() 의 스트리밍 재현."""
@@ -64,7 +83,12 @@ class TemporalRiskScorer:
         self.version = bundle.get("version", 2)
         self.proba_ewma = _Ewma(bundle["proba_ewma_alpha"])
         self.ewma_alpha = bundle["ewma_alpha"]
-        if self.version >= 5:
+        if self.version >= 6:
+            self.base = bundle["base_features"]              # 7 raw + 4 정규화
+            self.slope_cols = tuple(bundle["slope_cols"])
+            self.rel_src = []                                # v6 는 상대특징을 쓰지 않는다
+            self.long_alpha = bundle.get("long_alpha", 0.02)
+        elif self.version == 5:
             self.base = bundle["base_features"]              # 7 raw + 4 rel
             self.slope_cols = tuple(bundle["slope_cols"])
             self.rel_src = bundle["rel_features"]
@@ -93,7 +117,8 @@ class TemporalRiskScorer:
         return m, s, max(vals) - min(vals)
 
     def update(self, vy, vx, tilt, tilt_vel,
-               tilt3d=None, aspect=None, shoulder_y=None):
+               tilt3d=None, aspect=None, shoulder_y=None,
+               torso_n=None, body_n=None, hip_y=None, ankle_y=None):
         """한 프레임의 기본 특징을 받아 평활화된 낙상 위험 확률을 반환."""
         base = {"vertical_velocity": vy, "horizontal_velocity": vx,
                 "tilt_angle_deg": tilt, "tilt_angular_velocity": tilt_vel}
@@ -102,13 +127,27 @@ class TemporalRiskScorer:
                 raise ValueError("v4 모델은 tilt3d/aspect/shoulder_y 가 필요합니다")
             base.update({"tilt3d_deg": tilt3d, "aspect_ratio": aspect,
                          "shoulder_y": shoulder_y})
-        if self.version >= 5:
+        if self.version >= 6:
+            if None in (torso_n, body_n, hip_y, ankle_y):
+                raise ValueError(
+                    "v6 모델은 torso_n/body_n/hip_y/ankle_y 가 필요합니다")
+            base.update(derive_v6(vy, vx, torso_n, body_n, hip_y, ankle_y))
+        if self.version == 5:
             # 상대 특징을 먼저 만든다 (학습 시 add_relative 가 시간특징보다 앞서므로 순서 일치)
             for c in self.rel_src:
                 base[f"{c}_rel"] = base[c] - self.long_ewmas[c].update(base[c])
         f = dict(base)
-        f["speed_mag"] = math.hypot(vy, vx)
-        f["vert_accel"] = (vy - self.prev.get("vertical_velocity", vy)) * self.fps
+        # v6 는 속도 파생도 정규화 속도로 만든다 (train_v6.add_temporal_v6 와 일치).
+        # 원시 속도로 만들면 그 값만 카메라 거리에 다시 끌려간다.
+        if self.version >= 6:
+            f["speed_mag"] = math.hypot(base["vy_torso"], base["vx_torso"])
+            f["vert_accel"] = (base["vy_torso"]
+                               - self.prev.get("vy_torso", base["vy_torso"])) * self.fps
+            f["hip_h_vel"] = (base["hip_h"]
+                              - self.prev.get("hip_h", base["hip_h"])) * self.fps
+        else:
+            f["speed_mag"] = math.hypot(vy, vx)
+            f["vert_accel"] = (vy - self.prev.get("vertical_velocity", vy)) * self.fps
         f["tilt_accel"] = (tilt_vel - self.prev.get("tilt_angular_velocity", tilt_vel)) * self.fps
         if self.version >= 4:
             f["tilt3d_vel"] = (tilt3d - self.prev.get("tilt3d_deg", tilt3d)) * self.fps

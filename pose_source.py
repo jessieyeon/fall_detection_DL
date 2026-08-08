@@ -29,6 +29,7 @@ VELOCITY_THRESHOLD = 1.2    # 모델 파일이 없을 때만 쓰는 옛 단일 �
 
 L_SHOULDER, R_SHOULDER = 11, 12
 L_HIP, R_HIP = 23, 24
+L_ANKLE, R_ANKLE = 27, 28      # v6: 발목이 바닥 기준선 역할을 한다
 
 
 @dataclass
@@ -45,9 +46,13 @@ class PoseFrame:
 
 def load_risk_model(path="fall_risk_model.joblib", v2_path="fall_risk_model_v2.joblib",
                     v3_path="fall_risk_model_v3.joblib", v4_path="fall_risk_model_v4.joblib",
-                    v5_path="fall_risk_model_v5.joblib"):
-    # 최신 버전 우선: v5(도메인불변+의사라벨) > v4(3D) > v3 > v2 > v1 > 속도 임계값
-    for p, ver in ((v5_path, "v5"), (v4_path, "v4"), (v3_path, "v3"), (v2_path, "v2")):
+                    v5_path="fall_risk_model_v5.joblib",
+                    v6_path="fall_risk_model_v6.joblib"):
+    # 최신 버전 우선: v6(거리정규화) > v5(도메인불변+의사라벨) > v4(3D) > v3 > v2 > v1
+    # v6 파일은 학습만으로는 생기지 않는다 — train_v6.py 는 출력 디렉터리에 두고,
+    # 벤치마크가 v5 를 이겼을 때만 사람이 여기로 복사한다.
+    for p, ver in ((v6_path, "v6"), (v5_path, "v5"), (v4_path, "v4"),
+                   (v3_path, "v3"), (v2_path, "v2")):
         if not os.path.isfile(p):
             continue
         try:
@@ -183,7 +188,22 @@ class PoseSource:
             dy = (wl[L_HIP].y + wl[R_HIP].y) / 2 - (wl[L_SHOULDER].y + wl[R_SHOULDER].y) / 2
             dz = (wl[L_HIP].z + wl[R_HIP].z) / 2 - (wl[L_SHOULDER].z + wl[R_SHOULDER].z) / 2
             tilt3d = math.degrees(math.atan2(math.hypot(dx, dz), abs(dy) + 1e-9))
-        extra = {"aspect": aspect, "shoulder_y": shoulder_y, "tilt3d": tilt3d}
+
+        # --- v6 추가: 카메라 거리 정규화용 원시 길이 ---
+        # 식은 model_training/extract_v6.py 의 FS.step 과 반드시 같아야 한다.
+        # 전부 화면 기준 정규화 길이라 해상도에는 무관하고, 카메라 거리 정보만 담는다.
+        sx = (lms[L_SHOULDER].x + lms[R_SHOULDER].x) / 2.0
+        sy = (lms[L_SHOULDER].y + lms[R_SHOULDER].y) / 2.0
+        hx = (lms[L_HIP].x + lms[R_HIP].x) / 2.0
+        hy = (lms[L_HIP].y + lms[R_HIP].y) / 2.0
+        torso_n = math.hypot(hx - sx, hy - sy)
+        body_n = max(ys) - min(ys)
+        hip_y = hy
+        ankle_y = (lms[L_ANKLE].y + lms[R_ANKLE].y) / 2.0
+
+        extra = {"aspect": aspect, "shoulder_y": shoulder_y, "tilt3d": tilt3d,
+                 "torso_n": torso_n, "body_n": body_n,
+                 "hip_y": hip_y, "ankle_y": ankle_y}
         return drawn, landmarks, extra
 
     def _reset_history(self):
@@ -285,7 +305,10 @@ class PoseSource:
                     risk_score = self._v2_scorer.update(
                         vy, vx, tilt, tilt_vel,
                         tilt3d=tilt3d, aspect=extra["aspect"],
-                        shoulder_y=extra["shoulder_y"])
+                        shoulder_y=extra["shoulder_y"],
+                        # v6 전용. v4/v5 스코어러는 무시한다.
+                        torso_n=extra.get("torso_n"), body_n=extra.get("body_n"),
+                        hip_y=extra.get("hip_y"), ankle_y=extra.get("ankle_y"))
                 else:
                     risk_score = self._v2_scorer.update(vy, vx, tilt, tilt_vel)
                 is_risky = risk_score >= self.prob_threshold

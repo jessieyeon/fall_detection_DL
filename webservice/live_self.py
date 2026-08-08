@@ -18,7 +18,7 @@
 
 import math
 import os
-from collections import deque
+from collections import deque, namedtuple
 
 # 저장소 루트 모듈(순수 표준 라이브러리 — mediapipe/cv2 의존 없음)
 import tiles
@@ -26,6 +26,7 @@ from numpy_compat import bitgen_compat
 
 L_SHOULDER, R_SHOULDER = 11, 12
 L_HIP, R_HIP = 23, 24
+L_ANKLE, R_ANKLE = 27, 28      # v6: 발목이 바닥 기준선
 
 SMOOTHING_WINDOW = 3     # pose_source.SMOOTHING_WINDOW 와 동일
 RISK_COOLDOWN = 3.0      # main.py 와 동일
@@ -34,6 +35,12 @@ MAX_FPS = 40.0           # 이보다 빨리 오는 프레임은 버린다 (클�
 
 _BUNDLE = None
 _BUNDLE_TRIED = False
+
+# 특징을 이름으로 받는다. 위치 기반 튜플이었을 때 v6 값 4개를 뒤에 붙이자마자
+# 끝에서부터 언패킹하던 코드가 조용히 어긋났다 — 이름이면 그런 일이 없다.
+Features = namedtuple("Features",
+                      "vy vx tilt tilt_vel tilt3d aspect shoulder_y "
+                      "torso_n body_n hip_y ankle_y")
 
 
 def load_bundle():
@@ -49,8 +56,9 @@ def load_bundle():
     except ImportError:
         print("[self-cam] joblib/pandas/scikit-learn 미설치 — 체험 기능 비활성")
         return None
-    for path in ("fall_risk_model_v5.joblib", "fall_risk_model_v4.joblib",
-                 "fall_risk_model_v3.joblib", "fall_risk_model_v2.joblib"):
+    for path in ("fall_risk_model_v6.joblib", "fall_risk_model_v5.joblib",
+                 "fall_risk_model_v4.joblib", "fall_risk_model_v3.joblib",
+                 "fall_risk_model_v2.joblib"):
         if not os.path.isfile(path):
             continue
         try:
@@ -183,6 +191,13 @@ class SelfSession:
         aspect = ((max(xs) - min(xs)) * w) / (((max(ys) - min(ys)) * h) + 1e-6)
         shoulder_y = (lm[L_SHOULDER][1] + lm[R_SHOULDER][1]) / 2.0
 
+        # v6 정규화용 원시 길이. extract_v6.py / pose_source.py 와 같은 식이다
+        # (랜드마크가 이미 정규화 좌표라 화면 크기를 곱하지 않는다).
+        torso_n = math.hypot(hip[0] - shoulder[0], hip[1] - shoulder[1])
+        body_n = max(ys) - min(ys)
+        hip_y = hip[1]
+        ankle_y = (lm[L_ANKLE][1] + lm[R_ANKLE][1]) / 2.0
+
         tilt3d = None
         if wlm:
             wdx = (wlm[L_HIP][0] + wlm[R_HIP][0]) / 2 - (wlm[L_SHOULDER][0] + wlm[R_SHOULDER][0]) / 2
@@ -195,7 +210,8 @@ class SelfSession:
         self._prev_center = center
         self._prev_tilt = tilt
         self._prev_time = now
-        return vy, vx, tilt, tilt_vel, tilt3d, aspect, shoulder_y
+        return Features(vy, vx, tilt, tilt_vel, tilt3d, aspect, shoulder_y,
+                        torso_n, body_n, hip_y, ankle_y)
 
     # --- 프레임 처리 ---
 
@@ -226,19 +242,24 @@ class SelfSession:
 
         w = float(msg.get("w") or 640)
         h = float(msg.get("h") or 480)
-        vy, vx, tilt, tilt_vel, tilt3d, aspect, shoulder_y = \
-            self._features(lm, msg.get("wlm"), w, h, now)
+        ft = self._features(lm, msg.get("wlm"), w, h, now)
 
-        if self._version >= 4:
-            risk = self.scorer.update(vy, vx, tilt, tilt_vel,
-                                      tilt3d=tilt3d, aspect=aspect,
-                                      shoulder_y=shoulder_y)
+        if self._version >= 6:
+            risk = self.scorer.update(ft.vy, ft.vx, ft.tilt, ft.tilt_vel,
+                                      tilt3d=ft.tilt3d, aspect=ft.aspect,
+                                      shoulder_y=ft.shoulder_y,
+                                      torso_n=ft.torso_n, body_n=ft.body_n,
+                                      hip_y=ft.hip_y, ankle_y=ft.ankle_y)
+        elif self._version >= 4:
+            risk = self.scorer.update(ft.vy, ft.vx, ft.tilt, ft.tilt_vel,
+                                      tilt3d=ft.tilt3d, aspect=ft.aspect,
+                                      shoulder_y=ft.shoulder_y)
         else:
-            risk = self.scorer.update(vy, vx, tilt, tilt_vel)
+            risk = self.scorer.update(ft.vy, ft.vx, ft.tilt, ft.tilt_vel)
 
         if risk >= self.prob_threshold:
-            direction = tiles.direction_from_motion(vx, vy)
-            lean = tiles.lean_from_tilt(tilt)
+            direction = tiles.direction_from_motion(ft.vx, ft.vy)
+            lean = tiles.lean_from_tilt(ft.tilt)
             self._window.append((direction, lean))
             self._streak += 1
         else:

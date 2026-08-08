@@ -68,8 +68,7 @@ def test_tilt_45deg_when_hip_shifted():
     spread = 0.2
     dx_norm = spread * 2 * 480 / 640          # dy = 0.4*480px → dx = 192px/640
     lm = _lm(tilt_x=dx_norm)
-    *_, tilt, _tv, _t3, _asp, _sy = s._features(lm, None, 640, 480, 0.0)
-    assert tilt == pytest.approx(45.0, abs=0.5)
+    assert s._features(lm, None, 640, 480, 0.0).tilt == pytest.approx(45.0, abs=0.5)
 
 
 def test_vertical_velocity_from_descent():
@@ -86,7 +85,7 @@ def test_tilt3d_from_world_landmarks():
     wlm = [list(p) for p in wlm]
     wlm[11] = [-0.2, -0.3, 0.0]; wlm[12] = [0.2, -0.3, 0.0]
     wlm[23] = [-0.2, 0.3, 0.3];  wlm[24] = [0.2, 0.3, 0.3]   # 깊이 방향 기울기
-    *_, tilt3d, _asp, _sy = s._features(_lm(), wlm, 640, 480, 0.0)
+    tilt3d = s._features(_lm(), wlm, 640, 480, 0.0).tilt3d
     assert tilt3d == pytest.approx(math.degrees(math.atan2(0.3, 0.6)), abs=0.5)
 
 

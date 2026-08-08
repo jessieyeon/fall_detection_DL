@@ -37,6 +37,18 @@ SLOPE_COLS_V6 = ew.SLOPE_COLS + ("hip_h", "vy_torso")
 
 RAW_LENGTHS = ["torso_n", "body_n", "hip_y", "ankle_y"]
 
+# 홀드아웃으로 인정할 최소 영상 수. 이보다 적으면 숫자가 요동쳐서 결론에 쓸 수 없다.
+MIN_HOLDOUT_VIDEOS = 5
+
+# V6_ABLATE=1 이면 v6 파생 특징을 빼고 v4 특징만으로 학습한다(대조군).
+# 데이터가 일부만 있을 때 "성능 변화가 특징 때문인지 데이터 때문인지"를 가르려면
+# **같은 데이터로** 두 특징 집합을 비교해야 한다. 이 스위치가 그 대조군을 만든다.
+ABLATE = os.environ.get("V6_ABLATE") == "1"
+if ABLATE:
+    BASE_V6 = list(ew.BASE)
+    ROLL_V6 = BASE_V6 + ["speed_mag"]
+    SLOPE_COLS_V6 = ew.SLOPE_COLS
+
 # add_normalized 의 0 나눗셈 방지 하한. temporal_risk.derive_v6 도 같은 값을 써야 한다.
 MIN_TORSO, MIN_BODY = 0.02, 0.05
 
@@ -73,13 +85,16 @@ def add_temporal_v6(df):
     out = []
     for _, g in df.groupby("video_id", sort=False):
         g = g.sort_values("frame").copy()
-        g["speed_mag"] = np.hypot(g["vy_torso"], g["vx_torso"])
-        g["vert_accel"] = g["vy_torso"].diff().fillna(0) * ew.FPS_T
+        vy_col = "vertical_velocity" if ABLATE else "vy_torso"
+        vx_col = "horizontal_velocity" if ABLATE else "vx_torso"
+        g["speed_mag"] = np.hypot(g[vy_col], g[vx_col])
+        g["vert_accel"] = g[vy_col].diff().fillna(0) * ew.FPS_T
         g["tilt_accel"] = g["tilt_angular_velocity"].diff().fillna(0) * ew.FPS_T
         g["tilt3d_vel"] = g["tilt3d_deg"].diff().fillna(0) * ew.FPS_T
         g["aspect_vel"] = g["aspect_ratio"].diff().fillna(0) * ew.FPS_T
         g["shoulder_vel"] = g["shoulder_y"].diff().fillna(0) * ew.FPS_T
-        g["hip_h_vel"] = g["hip_h"].diff().fillna(0) * ew.FPS_T
+        if not ABLATE:
+            g["hip_h_vel"] = g["hip_h"].diff().fillna(0) * ew.FPS_T
         for w in WINDOWS:
             for c in ROLL_V6:
                 r = g[c].rolling(w, min_periods=1)
@@ -101,7 +116,8 @@ def augment_video(g, kind):
     if kind == "mirror":
         a = g.copy()
         a["horizontal_velocity"] = -a["horizontal_velocity"]
-        a["vx_torso"] = -a["vx_torso"]
+        if not ABLATE:
+            a["vx_torso"] = -a["vx_torso"]
     else:
         s = float(kind)
         n = max(int(len(g) / s), 15)
@@ -109,9 +125,11 @@ def augment_video(g, kind):
         a = pd.DataFrame({c: np.interp(pos, np.arange(len(g)), g[c].values)
                           for c in BASE_V6})
         # 속도류는 재생속도에 비례해 커진다. 길이·비율류(hip_h, torso_ratio)는 그대로.
+        # 대조군(ABLATE)에는 정규화 속도 컬럼이 아예 없으므로 있는 것만 곱한다.
         for c in ("vertical_velocity", "horizontal_velocity",
                   "tilt_angular_velocity", "vy_torso", "vx_torso"):
-            a[c] *= s
+            if c in a.columns:
+                a[c] *= s
         a["label"] = g["label"].values[np.round(pos).astype(int)]
         a["frame"] = np.arange(1, n + 1)
         a["dataset"] = g["dataset"].iloc[0]
@@ -137,8 +155,12 @@ def score(clf, feats, te):
 
 
 def main():
-    csv_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
-        "~/Documents/Claude/Projects/FallDetection/data/features_v6.csv")
+    # 데이터 위치는 환경에 따라 다르다. DAON_DATA 로 덮어쓸 수 있게 해서
+    # 데이터셋을 옮겨도 스크립트를 고치지 않아도 되게 한다.
+    default_data = os.environ.get(
+        "DAON_DATA", os.path.expanduser("~/Desktop/FallDetection/data"))
+    csv_path = sys.argv[1] if len(sys.argv) > 1 \
+        else os.path.join(default_data, "features_v6.csv")
     out_dir = sys.argv[2] if len(sys.argv) > 2 else "/tmp/daon_exp"
     os.makedirs(out_dir, exist_ok=True)
     t0 = time.time()
@@ -150,7 +172,7 @@ def main():
 
     le2i_tr, le2i_te, urfd_tr, urfd_te, own, mcf_te = ew.split_data(d)
 
-    scored, clf, feats = {}, None, None
+    scored, clf, feats, missing = {}, None, None, []
     for test_p in ("p1", "p2"):
         own_tr = own[own.person != test_p].drop(columns=["person"])
         own_te = own[own.person == test_p].drop(columns=["person"])
@@ -168,10 +190,17 @@ def main():
         scored[f"own_{test_p}"] = (score(clf, feats, own_te), 30.0, 0.5)
         print(f"  {test_p} 학습 완료 ({len(feats)} feats, {time.time()-t0:.0f}s)", flush=True)
         if test_p == "p2":
-            # 공개 홀드아웃은 v4·실험A 와 같이 p2 폴드 모델로 평가
-            scored["Le2i"] = (score(clf, feats, le2i_te), 25.0, 0.0)
-            scored["URFD"] = (score(clf, feats, urfd_te), 30.0, 0.0)
-            scored["MCF"] = (score(clf, feats, mcf_te.drop(columns=["scen"])), 30.0, 0.0)
+            # 공개 홀드아웃은 v4·실험A 와 같이 p2 폴드 모델로 평가.
+            # 데이터가 없는 홀드아웃은 건너뛴다 — 일부 데이터셋만 로컬에 있는
+            # 상황(예: iCloud 로 축출됨)에서도 자체 클립 결과는 낼 수 있어야 한다.
+            for name, te, fps in (("Le2i", le2i_te, 25.0),
+                                  ("URFD", urfd_te, 30.0),
+                                  ("MCF", mcf_te.drop(columns=["scen"]), 30.0)):
+                if te.empty or te["video_id"].nunique() < MIN_HOLDOUT_VIDEOS:
+                    n = 0 if te.empty else te["video_id"].nunique()
+                    missing.append(f"{name}({n}영상)")
+                    continue
+                scored[name] = (score(clf, feats, te), fps, 0.0)
 
     sweep = []
     for thr, pers in itertools.product((0.05, 0.1, 0.15, 0.3, 0.5), (1, 2, 3, 5)):
@@ -187,7 +216,8 @@ def main():
 
     best = min(sweep, key=lambda r: (-r["own"]["catch"], r["own"]["fp"]))
     with open(os.path.join(out_dir, "v6_sweep.json"), "w") as fh:
-        json.dump({"windows": list(WINDOWS), "n_features": len(feats), "sweep": sweep},
+        json.dump({"windows": list(WINDOWS), "n_features": len(feats),
+                   "missing_holdouts": missing, "sweep": sweep},
                   fh, ensure_ascii=False, indent=1)
 
     bundle = {"model": clf, "features": feats, "base_features": BASE_V6,
@@ -198,15 +228,27 @@ def main():
               "version": 6}
     # joblib 은 여기서만 임포트한다 — add_normalized 만 쓰는 테스트가 joblib 없이 돈다.
     import joblib
-    joblib.dump(bundle, "fall_risk_model_v6.joblib")
+    # **저장소 루트가 아니라 출력 디렉터리에 쓴다.** 파이프라인은 루트의
+    # fall_risk_model_v6.joblib 을 v5 보다 우선해서 읽으므로, 학습만 했는데 파일이
+    # 루트에 생기면 검증도 안 된 모델이 부스와 온라인 체험에 곧바로 반영된다.
+    # 채택은 벤치마크를 보고 사람이 복사하는 것으로 한다(아래 안내 참고).
+    staged = os.path.join(out_dir, "fall_risk_model_v6.joblib")
+    joblib.dump(bundle, staged)
 
-    o, l, u, m = best["own"], best["Le2i"], best["URFD"], best["MCF"]
+    o = best["own"]
     print(f"\n최적 동작점: thr {best['thr']} / pers {best['pers']}")
     print(f"  자체 클립 {o['catch']}/{o['nfall']} @FP {o['fp']} (선행 {o['lead']}초)")
-    print(f"  Le2i {l['catch']}/{l['nfall']} @FP {l['fp']}")
-    print(f"  URFD {u['catch']}/{u['nfall']} @FP {u['fp']}")
-    print(f"  MCF  {m['catch']}/{m['nfall']}")
-    print(f"fall_risk_model_v6.joblib 저장됨 ({time.time()-t0:.0f}s)")
+    for name in ("Le2i", "URFD", "MCF"):
+        r = best.get(name)
+        if r is None:
+            continue
+        print(f"  {name} {r['catch']}/{r['nfall']} @FP {r['fp']}")
+    if missing:
+        print(f"  ※ 평가 못 한 홀드아웃: {', '.join(missing)}")
+        print("     해당 데이터가 로컬에 없습니다. 받은 뒤 다시 돌리면 채워집니다.")
+    print(f"\n모델 저장: {staged}  ({time.time()-t0:.0f}s)")
+    print("아직 배포에 반영되지 않았습니다. 위 숫자가 v5 보다 나을 때만 채택하세요:")
+    print(f"    cp {staged} fall_risk_model_v6.joblib")
 
 
 if __name__ == "__main__":
