@@ -43,3 +43,6 @@ hardware/
 !webservice/data/**
 !webservice/consulting/samples/**
 !webservice/frontend/public/**
+# 셀프캠 체험용 배포 모델. *.joblib 전체 제외에서 이 파일 하나만 되살린다 —
+# 없으면 Dockerfile 의 COPY 가 "file not found" 로 빌드에서 실패한다.
+!fall_risk_model_v5.joblib

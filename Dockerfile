@@ -44,10 +44,17 @@ COPY requirements.txt ./
 RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
         -r requirements.txt
 
-# webservice/ 만 복사한다. main.py 등 루트 모듈은 실시간 감지 파이프라인
-# 전용이고 webservice 는 그중 무엇도 임포트하지 않는다(확인 완료). 넣어두면
-# 서버에 없는 의존성(pyserial, mediapipe)을 요구하는 코드가 이미지에 남을 뿐이다.
+# webservice/ 에 더해, live_self.py(셀프캠 체험)가 임포트하는 루트 모듈들을
+# 함께 복사한다. 예전에는 "webservice 는 루트 모듈을 임포트하지 않는다"가
+# 맞았지만 v6 서빙 통합 때부터 아니다 — 이 목록이 빠지면 컨테이너가
+# `ModuleNotFoundError: tiles` 로 기동조차 못 한다(실제 배포 사고).
+# main.py·pose_source.py 등 나머지 루트 모듈은 여전히 넣지 않는다. 서버에
+# 없는 의존성(pyserial, mediapipe)을 요구하는 코드를 이미지에 남기지 않기 위해서다.
 COPY webservice/ ./webservice/
+COPY tiles.py numpy_compat.py config.py temporal_risk.py profiles.json ./
+# 낙상 위험 모델. .dockerignore 의 *.joblib 제외에서 이 파일만 되살려 놓았다.
+# 없으면 서버는 뜨지만 셀프캠 체험이 '모델 파일 없음'으로 조용히 꺼진다.
+COPY fall_risk_model_v5.joblib ./
 # 프런트 빌드 산출물을 1단계에서 가져온다
 COPY --from=frontend /app/webservice/frontend/dist ./webservice/frontend/dist
 
