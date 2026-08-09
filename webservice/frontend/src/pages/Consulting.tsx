@@ -55,6 +55,23 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
   const [showEvidence, setShowEvidence] = useState(false);
   const [ready, setReady] = useState<Set<string> | null>(null);   // null=확인 중
   const [sampleTab, setSampleTab] = useState<string>(SAMPLES[0].id);
+  const [showSamples, setShowSamples] = useState(true);
+  // 촬영 위치 목록은 사용자가 늘릴 수 있다. 시설마다 부르는 이름이 다르고
+  // ('식당', '물리치료실'…) 결과 화면에는 이 이름이 그대로 찍히기 때문이다.
+  const [rooms, setRooms] = useState<string[]>(ROOMS);
+  const [addingRoom, setAddingRoom] = useState(false);
+  const [newRoom, setNewRoom] = useState("");
+
+  function addRoom() {
+    const name = newRoom.trim();
+    if (!name) { setAddingRoom(false); setNewRoom(""); return; }
+    // 이미 있으면 새로 만들지 않고 그것을 고른다 — 같은 이름이 둘 생기면
+    // 지난 결과 목록에서 어느 쪽인지 구분할 수 없다.
+    setRooms((prev) => (prev.includes(name) ? prev : [...prev, name]));
+    setRoom(name);
+    setNewRoom("");
+    setAddingRoom(false);
+  }
 
   const loadList = () => consultingReports().then(setReports).catch(() => {});
   const open = async (rid: number) => setActive(await consultingReport(rid));
@@ -181,8 +198,39 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
       </div>
 
       {/* 샘플 선택 — 탭으로 방을 고르고, 영상을 직접 본 뒤 분석을 누른다.
-          무엇을 분석하는지 눈으로 확인한 다음 결과를 봐야 체험이 이해된다. */}
-      <Section title="체험용">
+          무엇을 분석하는지 눈으로 확인한 다음 결과를 봐야 체험이 이해된다.
+
+          접었다 펼 수 있게 둔 이유: 실제 시설 담당자에게 이 칸은 한 번 써 보면
+          끝인 데모다. 늘 펼쳐 두면 정작 본 작업인 '내 영상 올리기'가 화면
+          아래로 밀린다. 처음 오는 사람을 위해 기본값은 펼침으로 둔다. */}
+      <Section gap={8}>
+        <button onClick={() => setShowSamples((v) => !v)} style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 12, width: "100%", padding: 0, background: "none", textAlign: "left",
+        }}>
+          <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontSize: font.h2, fontWeight: 700 }}>체험용</span>
+            <span style={{ fontSize: font.caption, color: color.inkFaint }}>
+              미리 준비된 영상을 가지고 동선 컨설팅을 체험해보세요!
+            </span>
+          </span>
+          <span style={{
+            flexShrink: 0, display: "flex", alignItems: "center", gap: 4,
+            fontSize: font.caption, color: color.brand, fontWeight: 600,
+          }}>
+            {showSamples ? "접기" : "펼치기"}
+            {/* Chevron 은 오른쪽을 가리키는 모양 하나뿐이라 회전으로 방향을 만든다 */}
+            <span style={{
+              display: "inline-flex",
+              transform: `rotate(${showSamples ? -90 : 90}deg)`,
+              transition: "transform .2s ease",
+            }}>
+              <Chevron size={14} color={color.brand} />
+            </span>
+          </span>
+        </button>
+
+        {showSamples && (
         <Card pad={0} data-tour="samples" style={{ overflow: "hidden" }}>
           <div style={{ display: "flex", borderBottom: `1px solid ${color.line}` }}>
             {SAMPLES.map((s) => {
@@ -234,17 +282,31 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
             );
           })()}
         </Card>
+        )}
       </Section>
 
       {/* 직접 업로드 */}
       <Section title="내 영상 올리기">
         <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
-            <div style={{ fontSize: font.caption, color: color.inkFaint, marginBottom: 6 }}>
-              촬영 위치
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6, marginBottom: 6,
+            }}>
+              <span style={{ fontSize: font.caption, color: color.inkFaint }}>
+                촬영 위치
+              </span>
+              <button onClick={() => setAddingRoom(true)} aria-label="촬영 위치 추가"
+                      title="촬영 위치 추가" style={{
+                width: 18, height: 18, borderRadius: "50%", padding: 0,
+                border: `1px solid ${color.line}`, background: color.surface,
+                color: color.brand, fontSize: 13, fontWeight: 700, lineHeight: 1,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                +
+              </button>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {ROOMS.map((r) => (
+              {rooms.map((r) => (
                 <button key={r} onClick={() => setRoom(r)} style={{
                   padding: "5px 11px", fontSize: font.caption, fontWeight: 600,
                   borderRadius: 999,
@@ -256,6 +318,26 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
                 </button>
               ))}
             </div>
+            {addingRoom && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <input autoFocus value={newRoom} placeholder="예: 식당"
+                       onChange={(e) => setNewRoom(e.target.value)}
+                       onKeyDown={(e) => {
+                         if (e.key === "Enter") { e.preventDefault(); addRoom(); }
+                         if (e.key === "Escape") { setAddingRoom(false); setNewRoom(""); }
+                       }}
+                       style={{
+                         flex: 1, minWidth: 0, padding: "6px 10px",
+                         fontSize: font.caption, borderRadius: radius.sm,
+                         border: `1px solid ${color.line}`,
+                       }} />
+                <Button onClick={addRoom}>추가</Button>
+                <Button variant="outline"
+                        onClick={() => { setAddingRoom(false); setNewRoom(""); }}>
+                  취소
+                </Button>
+              </div>
+            )}
           </div>
           <Button as="label" full disabled={busy}
                   icon={<Video size={16} color={color.white} />}

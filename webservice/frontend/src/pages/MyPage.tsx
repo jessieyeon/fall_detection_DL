@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   adminMeta, createResident, deleteCamera, deleteResident,
   listCameras, listResidents, logout, registerCamera, scanCameras,
-  updateCamera,
+  updateCamera, updateResident,
   type Camera, type FoundDevice, type Resident, type User,
 } from "../api";
 import { color, font, radius } from "../theme";
@@ -257,16 +257,29 @@ function CameraSection({ residents }: { residents: Resident[] }) {
         </div>
       )}
 
-      {/* 기기 탐색 */}
+      {/* 기기 탐색 — 버튼은 '어르신 추가'와 같은 모양(outline·좌측 정렬)으로
+          둔다. 두 섹션이 하는 일이 같은데(목록에 하나 더한다) 버튼만 달라
+          보이면 한쪽이 더 중요한 동작처럼 읽힌다. 눌러야 탐색 카드가 열리는
+          흐름도 '어르신 추가' 쪽과 맞췄다. */}
+      {!scanning && found === null && (
+        <Button variant="outline" style={{ alignSelf: "flex-start" }} onClick={scan}>
+          카메라 추가
+        </Button>
+      )}
+
+      {(scanning || found !== null) && (
       <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Button icon={<Wifi size={15} color={color.white} />}
-                  onClick={scan} disabled={scanning}>
-            {scanning ? "찾는 중…" : "카메라 추가"}
-          </Button>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <Wifi size={15} color={color.brand} />
           <span style={{ fontSize: font.caption, color: color.inkFaint }}>
             같은 네트워크에 켜져 있는 카메라를 찾습니다
           </span>
+          <button onClick={() => { setFound(null); setPicked(null); setError(""); }}
+                  style={{ marginLeft: "auto", fontSize: font.caption, color: color.inkFaint }}>
+            닫기
+          </button>
         </div>
 
         {scanning && (
@@ -354,6 +367,10 @@ function CameraSection({ residents }: { residents: Resident[] }) {
 
         <ErrorText>{error}</ErrorText>
       </Card>
+      )}
+
+      {/* 탐색 카드가 닫힌 상태에서 난 오류(주로 탐색 요청 자체의 실패) */}
+      {!scanning && found === null && <ErrorText>{error}</ErrorText>}
     </Section>
   );
 }
@@ -367,18 +384,41 @@ function ResidentSection({ residents, reload }:
   const [form, setForm] = useState(empty);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  // 수정 중인 어르신 id. null 이면 새로 추가하는 중이다. 추가 폼과 수정 폼이
+  // 필드가 똑같아서 하나를 돌려 쓴다 — 두 벌로 두면 항목을 늘릴 때마다
+  // 한쪽만 고치는 실수가 난다.
+  const [editing, setEditing] = useState<number | null>(null);
 
-  const add = async () => {
+  const close = () => { setOpen(false); setEditing(null); setForm(empty); setError(""); };
+
+  const startEdit = (r: Resident) => {
     setError("");
+    setEditing(r.id);
+    setForm({
+      name: r.name,
+      age: r.age == null ? "" : String(r.age),
+      room: r.room ?? "", phone: r.phone ?? "",
+      note: r.note ?? "", address: r.address ?? "",
+    });
+    setOpen(true);
+  };
+
+  const save = async () => {
+    setError("");
+    const body = {
+      name: form.name,
+      age: form.age ? Number(form.age) : null,
+      room: form.room, phone: form.phone, note: form.note,
+      address: form.address,
+    };
     try {
-      await createResident({
-        name: form.name,
-        age: form.age ? Number(form.age) : null,
-        room: form.room, phone: form.phone, note: form.note,
-        address: form.address,
-      });
-      setForm(empty);
-      setOpen(false);
+      if (editing == null) await createResident(body);
+      // 서버는 null 필드를 무시하므로(exclude_none) 나이를 지우려면 값을
+      // 빼는 게 아니라 아예 보내지 않는 편이 안전하다.
+      else await updateResident(editing, form.age
+        ? body
+        : { ...body, age: undefined });
+      close();
       reload();
     } catch (e) {
       setError((e as Error).message);
@@ -440,10 +480,13 @@ function ResidentSection({ residents, reload }:
               {r.address && (
                 <div style={{ fontSize: font.caption, color: color.inkFaint }}>{r.address}</div>
               )}
-              <Button variant="ghost" style={{ alignSelf: "flex-start", color: color.red }}
-                      onClick={() => remove(r)}>
-                삭제
-              </Button>
+              <div style={{ display: "flex", gap: 4, marginTop: "auto" }}>
+                <Button variant="ghost" onClick={() => startEdit(r)}>수정</Button>
+                <Button variant="ghost" style={{ color: color.red }}
+                        onClick={() => remove(r)}>
+                  삭제
+                </Button>
+              </div>
             </Card>
           ))}
         </div>
@@ -451,13 +494,16 @@ function ResidentSection({ residents, reload }:
 
       {!open && (
         <Button variant="outline" style={{ alignSelf: "flex-start" }}
-                onClick={() => setOpen(true)}>
+                onClick={() => { setEditing(null); setForm(empty); setOpen(true); }}>
           어르신 추가
         </Button>
       )}
 
       {open && (
         <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontSize: font.small, fontWeight: 700 }}>
+            {editing == null ? "어르신 추가" : `${form.name || "어르신"} 정보 수정`}
+          </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <Field label="이름" value={form.name}
                    onChange={(e: { target: { value: string } }) =>
@@ -495,8 +541,8 @@ function ResidentSection({ residents, reload }:
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Button onClick={add}>추가</Button>
-            <Button variant="ghost" onClick={() => setOpen(false)}>취소</Button>
+            <Button onClick={save}>{editing == null ? "추가" : "저장"}</Button>
+            <Button variant="ghost" onClick={close}>취소</Button>
           </div>
           <ErrorText>{error}</ErrorText>
         </Card>
