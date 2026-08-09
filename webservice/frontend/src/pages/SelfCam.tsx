@@ -4,6 +4,8 @@ import { Alert, Person, Video } from "../ui/icons";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import { useIsMobile } from "../useMedia";
+import { CANVAS_H, CANVAS_W, drawScene } from "../ui/skeleton";
+import { mediaBox, mediaFill, stageGrid } from "../ui/stage";
 
 /**
  * 내 카메라 체험 — 관람객 기기의 카메라로 낙상 감지를 직접 체험한다.
@@ -22,19 +24,20 @@ const MODEL_URL =
   "pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
 const SEND_FPS = 20;                 // 서버 전송 상한. 판정 품질에 충분한 수준.
-/** 실시간 감지 화면(Live.tsx)의 캔버스와 같은 크기·비율로 맞춘다. */
-const CANVAS_W = 480;
-const CANVAS_H = 720;
-const FLOOR_TOP = 0.6;               // Live.tsx 와 동일
-const CONNECTIONS: [number, number][] = [
-  [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
-  [11, 23], [12, 24], [23, 24],
-  [23, 25], [25, 27], [24, 26], [26, 28],
-];
+
+/**
+ * 이 화면에는 완충 타일 하드웨어(아두이노)가 붙어 있지 않다. 관람객 브라우저에서
+ * 도는 체험이라 물리 장치가 있을 수 없다 — 부스의 실시간 감지와 다른 점이다.
+ *
+ * 그래서 판정이 '낙상'으로 떨어져도 타일을 켜거나 "작동" 이라고 말하지 않는다.
+ * 실제로는 아무것도 펴지지 않는데 화면만 작동한 것처럼 보이면, 관람객이 제품
+ * 성능을 잘못 이해한 채 돌아간다. 대신 왜 안 켜지는지를 화면 위에 밝힌다.
+ * (이 화면에만 해당하므로 상수로 박아둔다. 실시간 감지는 영향받지 않는다.)
+ */
+const TILE_HARDWARE_CONNECTED = false;
+const NO_TILE_NOTICE = "타일에 연결이 되어 있지 않아 타일 작동이 불가합니다";
 
 type Phase = "loading" | "running" | "busy" | "unavailable" | "error";
-
-type FallState = { tiles: number[]; rows: number; cols: number } | null;
 
 export default function SelfCam({ onExit }: { onExit: () => void }) {
   const mobile = useIsMobile();
@@ -42,15 +45,13 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [errorMsg, setErrorMsg] = useState("");
-  const [risk, setRisk] = useState(0);
-  const [prog, setProg] = useState<[number, number]>([0, 3]);
-  const [fall, setFall] = useState<FallState>(null);
 
-  // 최신 상태를 rAF 루프에서 읽기 위한 ref (state 클로저 고착 방지)
-  const riskRef = useRef(0);
-  const fallRef = useRef<FallState>(null);
-  riskRef.current = risk;
-  fallRef.current = fall;
+  /** 마지막으로 검출된 관절 좌표.
+   *
+   * 화면 갱신(rAF, 60fps)이 카메라 프레임(보통 30fps)보다 빠르다. 새 프레임이
+   * 아직 안 온 회차에 스켈레톤을 안 그리면 한 프레임씩 걸러 사람이 사라져
+   * **심하게 깜빡인다.** 마지막 자세를 들고 있다가 다시 그려서 이어 붙인다. */
+  const poseRef = useRef<number[][] | null>(null);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -106,12 +107,11 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
       ws = new WebSocket(`${proto}://${window.location.host}/ws/live/self`);
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
-        if (m.type === "ready") { setPhase("running"); setProg([0, m.persistence]); }
+        // 판정 결과(self/fall)는 받되 화면에 쓰지 않는다 — 타일 하드웨어가
+        // 없는 화면이라 점등·감지 표시를 하지 않기로 했다(위 상수 참고).
+        if (m.type === "ready") setPhase("running");
         else if (m.type === "busy") setPhase("busy");
         else if (m.type === "unavailable") setPhase("unavailable");
-        else if (m.type === "self") { setRisk(m.risk); setProg(m.prog); }
-        else if (m.type === "fall") setFall({ tiles: m.tiles, rows: m.rows, cols: m.cols });
-        else if (m.type === "reset") setFall(null);
       };
       ws.onerror = () => fail("판정 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
 
@@ -123,36 +123,22 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
         const cv = canvasRef.current;
         if (!cv || video.readyState < 2) return;
 
-        // 실시간 감지 화면과 같은 세로 비율(480×720). 카메라 원본을 더 이상
-        // 그리지 않으므로 캔버스 크기를 영상 해상도에 맞출 이유가 없고,
-        // 두 화면이 다른 비율이면 같은 기능이 다른 제품처럼 보인다.
-        const W = (cv.width = CANVAS_W);
-        const H = (cv.height = CANVAS_H);
-        const ctx = cv.getContext("2d")!;
-
-        // 실시간 감지 화면과 같은 어두운 배경 위에 스켈레톤만 얹는다.
-        // 예전에는 카메라 원본을 반투명하게 깔았는데, 두 화면이 서로 다르게
-        // 보여서 같은 기능이 다른 제품처럼 읽혔다.
-        const bg = ctx.createLinearGradient(0, 0, 0, H);
-        bg.addColorStop(0, "#101623");
-        bg.addColorStop(1, "#1A2438");
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, W, H);
-
         const now = performance.now();
-        let lm: number[][] | null = null;
-        let wlm: number[][] | null = null;
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
           const res = landmarker.detectForVideo(video, now);
-          if (res.landmarks?.[0]) {
-            lm = res.landmarks[0].map((p: any) => [round(p.x), round(p.y), round(p.z)]);
-            wlm = res.worldLandmarks?.[0]?.map(
-              (p: any) => [round(p.x), round(p.y), round(p.z)]) ?? null;
-          }
+          // 사람을 놓친 프레임에는 null 로 지운다. 마지막 자세를 계속 들고
+          // 있으면 화면 밖으로 나간 뒤에도 유령처럼 남는다.
+          const lm: number[][] | null = res.landmarks?.[0]
+            ? res.landmarks[0].map((p: any) => [round(p.x), round(p.y), round(p.z)])
+            : null;
+          poseRef.current = lm;
+
           // 전송 스로틀 — 판정에는 20fps 면 충분하고 서버 부하는 절반이 된다.
           if (ws?.readyState === WebSocket.OPEN && now - lastSent >= 1000 / SEND_FPS) {
             lastSent = now;
+            const wlm = res.worldLandmarks?.[0]?.map(
+              (p: any) => [round(p.x), round(p.y), round(p.z)]) ?? null;
             // 판정에는 캔버스가 아니라 실제 영상 크기를 보낸다. 화면 비율을
             // 바꿨다고 판정 기준이 흔들리면 안 된다.
             ws.send(JSON.stringify({
@@ -161,40 +147,19 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
           }
         }
 
-        if (lm) {
-          const px = (p: number[]) => [(1 - p[0]) * W, p[1] * H] as const; // 거울 좌표
-          ctx.lineCap = "round";
-          ctx.shadowColor = "rgba(90,140,255,0.85)";
-          ctx.shadowBlur = 12;
-          ctx.strokeStyle = riskRef.current >= 0.5 ? "#FF6B6B" : "#6E9BFF";
-          ctx.lineWidth = 5;
-          for (const [a, b] of CONNECTIONS) {
-            if (lm[a] && lm[b]) {
-              ctx.beginPath();
-              ctx.moveTo(...px(lm[a]));
-              ctx.lineTo(...px(lm[b]));
-              ctx.stroke();
-            }
-          }
-          ctx.shadowBlur = 0;
-        }
-
-        // 바닥 타일(하드웨어 대응 시각화): 발동 시 해당 칸 점등
-        const f = fallRef.current;
-        const rows = f?.rows ?? 2, cols = f?.cols ?? 2;
-        const floorY = H * FLOOR_TOP, floorH = H - floorY;
-        for (let r = 0; r < rows; r++)
-          for (let c = 0; c < cols; c++) {
-            const idx = r * cols + c;
-            const cw = W / cols, ch = floorH / rows;
-            const x = c * cw, y = floorY + r * ch;
-            const fired = f?.tiles.includes(idx) ?? false;
-            ctx.fillStyle = fired ? "rgba(225,60,60,0.45)" : "rgba(255,255,255,0.04)";
-            ctx.fillRect(x + 3, y + 3, cw - 6, ch - 6);
-            ctx.lineWidth = fired ? 2.5 : 1;
-            ctx.strokeStyle = fired ? "#ff6b6b" : "rgba(120,150,210,0.3)";
-            ctx.strokeRect(x + 3, y + 3, cw - 6, ch - 6);
-          }
+        // 실시간 감지 화면과 완전히 같은 렌더러로 그린다(ui/skeleton.ts).
+        // 앞면 카메라라 좌우만 뒤집는다 — 거울이 아니면 손을 들었을 때
+        // 반대쪽 팔이 올라가 보인다.
+        cv.width = CANVAS_W;
+        cv.height = CANVAS_H;
+        drawScene(cv.getContext("2d")!, CANVAS_W, CANVAS_H, {
+          landmarks: poseRef.current,
+          // 하드웨어가 없으므로 격자는 그리되 점등은 하지 않는다(항상 빈 배열).
+          tiles: [],
+          rows: 2, cols: 2,
+          mirror: true,
+          placeholder: "사람이 감지되면 여기에 표시됩니다",
+        });
       };
       loop();
     })();
@@ -243,17 +208,16 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
   }
 
   return (
-    // 실시간 감지 화면과 같은 배치 — 영상을 왼쪽에 작게 두고 안내를 오른쪽에 세운다.
-    // 캔버스를 본문 폭에 꽉 채우면 화면을 넘겨서 스크롤해야만 설명이 보였다.
-    <div style={{
-      display: "grid", gap: 14, alignItems: "start",
-      gridTemplateColumns: mobile ? "1fr" : "minmax(0, 300px) 1fr",
-    }}>
-      <Card pad={0} style={{ overflow: "hidden" }}>
-        <div style={{ position: "relative", background: "#0E1116", lineHeight: 0 }}>
+    // 실시간 감지 화면과 같은 배치·크기(ui/stage.ts). 두 화면이 다른 크기로
+    // 보이면 같은 기능이 다른 제품처럼 읽힌다.
+    <div style={stageGrid(mobile)}>
+      <Card pad={0} style={{ overflow: "hidden", ...mediaBox(mobile) }}>
+        <div style={{
+          position: "relative", background: "#0E1116", lineHeight: 0, height: "100%",
+        }}>
           <video ref={videoRef} playsInline muted style={{ display: "none" }} />
           <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
-                  style={{ display: "block", width: "100%", height: "auto" }} />
+                  style={mediaFill} />
           {phase === "loading" && (
             <div style={{
               position: "absolute", inset: 0, display: "flex", flexDirection: "column",
@@ -282,39 +246,17 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
                   내 카메라
                 </span>
               </div>
-              {/* 위험도 게이지 */}
-              <div style={{
-                position: "absolute", left: 12, right: 12, bottom: 12,
-                padding: "8px 12px", borderRadius: radius.md,
-                background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
-                display: "flex", alignItems: "center", gap: 10,
-              }}>
-                <span style={{ fontSize: font.caption, color: "rgba(255,255,255,0.8)", flexShrink: 0 }}>
-                  낙상 위험
-                </span>
-                <div style={{ flex: 1, height: 8, borderRadius: 999, background: "rgba(255,255,255,0.15)" }}>
-                  <div style={{
-                    width: `${Math.min(100, risk * 100)}%`, height: "100%",
-                    borderRadius: 999, transition: "width .15s",
-                    background: risk >= 0.5 ? "#FF6B6B" : risk >= 0.1 ? "#FFB84D" : "#6E9BFF",
-                  }} />
-                </div>
-                <span style={{
-                  fontSize: font.caption, fontWeight: 700, flexShrink: 0,
-                  color: prog[0] > 0 ? "#FFB84D" : "rgba(255,255,255,0.6)",
-                }}>
-                  {prog[0]}/{prog[1]}
-                </span>
-              </div>
-              {fall && (
+              {!TILE_HARDWARE_CONNECTED && (
                 <div style={{
-                  position: "absolute", left: "50%", top: "38%",
-                  transform: "translate(-50%,-50%)",
-                  padding: "10px 20px", borderRadius: radius.md,
-                  background: "rgba(225,60,60,0.92)", color: color.white,
-                  fontSize: font.h2, fontWeight: 800, whiteSpace: "nowrap",
+                  position: "absolute", left: 12, right: 12, bottom: 12,
+                  padding: "8px 12px", borderRadius: radius.md, lineHeight: 1.4,
+                  background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+                  display: "flex", alignItems: "center", gap: 8,
                 }}>
-                  낙상 감지! 완충 타일 작동
+                  <Alert size={14} color={color.amber} />
+                  <span style={{ fontSize: font.caption, color: "rgba(255,255,255,0.9)" }}>
+                    {NO_TILE_NOTICE}
+                  </span>
                 </div>
               )}
             </>
@@ -329,13 +271,18 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
           <Person size={16} color={color.brand} />
           <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
             <b>발끝부터 머리까지</b> 카메라 화면 안에 모두 들어와야 자세를
-            정확히 인식합니다. 몸의 일부가 잘리면 감지가 어려우니,
-            카메라 위치를 고정한 뒤 다시 시작해 주세요.
+            정확히 인식합니다.
+            <br />
+            몸의 일부가 잘리면 감지가 어려우니, 카메라 위치를 고정한 뒤
+            다시 시작해 주세요.
           </span>
         </Card>
 
-        <Button variant="ghost" onClick={onExit} style={{ alignSelf: "flex-start" }}>
-          체험 끝내기
+        {/* 체험을 멈추면 실시간 탭의 첫 화면(카메라 연결 버튼이 있는 곳)으로
+            돌아간다. ghost 였을 때는 있는 줄도 모르고 탭을 옮겨 나가는 사람이
+            많아 카메라가 계속 켜져 있었다 — 눈에 띄는 버튼으로 둔다. */}
+        <Button variant="outline" onClick={onExit} style={{ alignSelf: "flex-start" }}>
+          체험 멈추기
         </Button>
       </div>
     </div>

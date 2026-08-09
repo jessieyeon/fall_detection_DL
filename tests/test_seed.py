@@ -9,8 +9,57 @@ def test_seed_creates_admin_account(tmp_path):
     conn = db.connect(path)
     row = auth.authenticate(conn, seed.ADMIN_EMAIL, seed.ADMIN_PW)
     assert row is not None and row["role"] == "admin"
-    assert row["facility_name"] and row["address"]      # 신고 지원이 쓸 값
     conn.close()
+
+
+def test_seed_leaves_facility_info_blank(tmp_path):
+    """시설명·주소는 비어 있어야 한다 — 관람객이 직접 입력해 보는 것이 체험이다.
+
+    시드값이 채워져 있으면 첫 화면부터 남의 시설처럼 보인다.
+    """
+    path = os.path.join(tmp_path, "t.db")
+    db.init_db(path)
+    seed.seed_demo(path)
+    conn = db.connect(path)
+    row = conn.execute("SELECT facility_name, address FROM users WHERE email = ?",
+                       (seed.ADMIN_EMAIL,)).fetchone()
+    conn.close()
+    assert row["facility_name"] == "" and row["address"] == ""
+
+
+def test_seed_does_not_overwrite_admin_edits(tmp_path):
+    """서버는 재시작마다 seed 를 돌린다. 관리자가 입력한 시설 정보가
+    재시작 때마다 시드값으로 되돌아가면 안 된다."""
+    path = os.path.join(tmp_path, "t.db")
+    db.init_db(path)
+    seed.seed_demo(path)
+    conn = db.connect(path)
+    conn.execute("UPDATE users SET facility_name = '한울요양원', "
+                 "address = '부산시 해운대구' WHERE email = ?", (seed.ADMIN_EMAIL,))
+    conn.commit()
+    conn.close()
+
+    seed.seed_demo(path)                     # 재시작 시뮬레이션
+
+    conn = db.connect(path)
+    row = conn.execute("SELECT facility_name, address FROM users WHERE email = ?",
+                       (seed.ADMIN_EMAIL,)).fetchone()
+    conn.close()
+    assert row["facility_name"] == "한울요양원"
+    assert row["address"] == "부산시 해운대구"
+
+
+def test_seed_keeps_sample_minimal(tmp_path):
+    """표본은 흐름을 보여줄 최소한 — 입주민 1명(김순자), 카메라 1대(라운지)."""
+    path = os.path.join(tmp_path, "t.db")
+    db.init_db(path)
+    seed.seed_demo(path)
+    conn = db.connect(path)
+    residents = [r["name"] for r in conn.execute("SELECT name FROM residents")]
+    cams = [r["name"] for r in conn.execute("SELECT name FROM cameras")]
+    conn.close()
+    assert residents == ["김순자"]
+    assert cams == ["1층 라운지"]
 
 
 def test_seed_creates_residents_and_cameras(tmp_path):

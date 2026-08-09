@@ -5,8 +5,10 @@
 등록하고, 낙상 이벤트(fall_events)를 받는다.
 
 주소 정책: 시설명·주소는 관리자 계정에 한 번만 둔다(users.facility_name/address).
-입주민은 호실(room)만 갖는다. 119 신고 지원 화면은 '시설주소 + 호실'로 조합한다.
-같은 주소를 입주민 수만큼 반복 입력하게 만들지 않기 위해서다.
+입주민은 호실(room)을 기본으로 갖고, 119 신고 지원 화면은 '시설주소 + 호실'로
+조합한다 — 같은 주소를 입주민 수만큼 반복 입력하게 만들지 않기 위해서다.
+입주민 개별 주소(residents.address)는 예외 경로다: 시설 밖에 거주하는 어르신
+(재가 서비스 등)을 위해 두며, 값이 있으면 신고 지원이 시설 주소 대신 이것을 쓴다.
 """
 
 import os
@@ -41,6 +43,8 @@ CREATE TABLE IF NOT EXISTS residents (
     room TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
+    -- 개별 주소(선택). 비어 있으면 시설 주소를 쓴다 — 위 '주소 정책' 참고.
+    address TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -101,6 +105,12 @@ def init_db(path=None):
     conn = connect(path)
     try:
         conn.executescript(_SCHEMA)
+        # CREATE TABLE IF NOT EXISTS 는 이미 있는 테이블에 새 컬럼을 더해주지
+        # 않는다. 배포 볼륨의 기존 DB 가 죽지 않도록 여기서 채워 넣는다.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(residents)")}
+        if "address" not in cols:                      # 2026-08-09 추가
+            conn.execute("ALTER TABLE residents "
+                         "ADD COLUMN address TEXT NOT NULL DEFAULT ''")
         conn.commit()
     finally:
         conn.close()

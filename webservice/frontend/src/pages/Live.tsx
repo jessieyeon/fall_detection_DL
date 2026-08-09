@@ -7,6 +7,8 @@ import Button from "../ui/Button";
 import SelfCam from "./SelfCam";
 import { useIsMobile } from "../useMedia";
 import { listCameras } from "../api";
+import { drawScene } from "../ui/skeleton";
+import { mediaBox, mediaFill, stageGrid } from "../ui/stage";
 
 /**
  * 데모 영상 경로. 영상 파일은 별도 제공 예정이므로 경로만 상수로 둔다.
@@ -20,12 +22,6 @@ const DEMO_POSTER_SRC = "/demo/fall-detection-demo.jpg";
  *  카메라를 고를 때는 `?device=<기기키>` 를 붙인다. */
 const STREAM_SRC = "/api/live/stream.mjpg";
 
-const CONNECTIONS: [number, number][] = [
-  [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
-  [11, 23], [12, 24], [23, 24],
-  [23, 25], [25, 27], [24, 26], [26, 28],
-];
-const FLOOR_TOP = 0.6;
 
 /** 연결 진단 패널을 보여줄지. 개발 서버이거나 ?diag=1 을 붙였을 때만 켠다.
  *  부스 노트북에서 배포 빌드를 그대로 쓰면서 진단이 필요할 때가 있어 뒷문을 남긴다. */
@@ -75,83 +71,11 @@ function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
       // 일시정지 중에는 캔버스를 건드리지 않는다 — 마지막 화면이 그대로 멈춰 있어야
       // 무엇 때문에 멈췄는지(자세, 타일) 들여다볼 수 있다.
       if (cv && !pausedRef.current) {
-        const ctx = cv.getContext("2d")!;
-        const { width: W, height: H } = cv;
         const s = stateRef.current;
-
-        // 배경: 카메라 원본 대신 어두운 그라디언트. 스켈레톤과 타일만 그리므로
-        // 대비가 높은 어두운 바탕이 읽기 좋다.
-        const bg = ctx.createLinearGradient(0, 0, 0, H);
-        bg.addColorStop(0, "#101623");
-        bg.addColorStop(1, "#1A2438");
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, W, H);
-
-        // 바닥 타일: 원근감 있는 격자. 낙상 시 해당 칸이 붉게 점등된다.
-        const floorY = H * FLOOR_TOP, floorH = H - floorY;
-        for (let r = 0; r < s.rows; r++)
-          for (let c = 0; c < s.cols; c++) {
-            const idx = r * s.cols + c;
-            const cwid = W / s.cols, chei = floorH / s.rows;
-            const x = c * cwid, y = floorY + r * chei;
-            const fired = s.tiles.includes(idx);
-            ctx.fillStyle = fired ? "rgba(225,60,60,0.45)" : "rgba(255,255,255,0.03)";
-            ctx.fillRect(x + 3, y + 3, cwid - 6, chei - 6);
-            ctx.lineWidth = fired ? 2.5 : 1;
-            ctx.strokeStyle = fired ? "#ff6b6b" : "rgba(120,150,210,0.25)";
-            ctx.strokeRect(x + 3, y + 3, cwid - 6, chei - 6);
-          }
-
-        if (s.landmarks) {
-          const px = (p: number[]) => [p[0] * W, p[1] * H] as const;
-
-          // 뼈대: 은은한 광 + 굵고 둥근 선. 브랜드 블루 톤.
-          ctx.lineCap = "round";
-          ctx.lineJoin = "round";
-          ctx.shadowColor = "rgba(90,140,255,0.85)";
-          ctx.shadowBlur = 14;
-          ctx.strokeStyle = "#6E9BFF";
-          ctx.lineWidth = 5;
-          for (const [a, b] of CONNECTIONS) {
-            const pa = s.landmarks[a], pb = s.landmarks[b];
-            if (pa && pb) {
-              ctx.beginPath();
-              ctx.moveTo(...px(pa));
-              ctx.lineTo(...px(pb));
-              ctx.stroke();
-            }
-          }
-          ctx.shadowBlur = 0;
-
-          // 관절: 흰 테두리를 두른 점. 주요 관절만 찍어 깔끔하게.
-          const JOINTS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-          for (const i of JOINTS) {
-            const p = s.landmarks[i];
-            if (!p) continue;
-            const [x, y] = px(p);
-            ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
-            ctx.fillStyle = "#FFFFFF"; ctx.fill();
-            ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
-            ctx.fillStyle = "#3D6DE8"; ctx.fill();
-          }
-
-          // 머리: 어깨 중점 위에 원. 랜드마크 0(코)을 중심으로 쓴다.
-          const nose = s.landmarks[0], ls = s.landmarks[11], rs = s.landmarks[12];
-          if (nose && ls && rs) {
-            const [nx, ny] = px(nose);
-            const headR = Math.max(10, Math.hypot(
-              (ls[0] - rs[0]) * W, (ls[1] - rs[1]) * H) * 0.32);
-            ctx.beginPath(); ctx.arc(nx, ny, headR, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(110,155,255,0.25)"; ctx.fill();
-            ctx.lineWidth = 3; ctx.strokeStyle = "#6E9BFF"; ctx.stroke();
-          }
-        } else {
-          // 사람이 안 잡히는 동안의 빈 화면 안내
-          ctx.fillStyle = "rgba(255,255,255,0.35)";
-          ctx.font = "15px sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillText("사람이 감지되면 여기에 표시됩니다", W / 2, H / 2);
-        }
+        drawScene(cv.getContext("2d")!, cv.width, cv.height, {
+          landmarks: s.landmarks, tiles: s.tiles, rows: s.rows, cols: s.cols,
+          placeholder: "사람이 감지되면 여기에 표시됩니다",
+        });
       }
       raf = requestAnimationFrame(draw);
     };
@@ -472,22 +396,17 @@ export default function Live() {
             </div>
           )}
 
-          {/* 데스크톱에서는 영상을 왼쪽에 작게 두고 안내를 오른쪽에 세운다.
-              세로 9:16 캔버스를 본문 폭에 꽉 채우면 화면을 넘겨서, 관람객이
-              스크롤해야만 안내를 볼 수 있었다. */}
-          <div style={{
-            display: "grid", gap: 14, alignItems: "start",
-            gridTemplateColumns: mobile ? "1fr" : "minmax(0, 300px) 1fr",
-          }}>
-          <Card pad={0} style={{ overflow: "hidden" }}>
-            <div style={{ position: "relative", background: "#0E1116" }}>
+          {/* 영상은 화면 높이에 맞춰 세우고, 안내가 그 옆을 채운다(ui/stage.ts). */}
+          <div style={stageGrid(mobile)}>
+          <Card pad={0} style={{ overflow: "hidden", ...mediaBox(mobile) }}>
+            <div style={{ position: "relative", background: "#0E1116", height: "100%" }}>
               {on ? (
                 // 캔버스에는 자세(스켈레톤)와 바닥 타일만 그린다. 카메라 원본은
                 // 서버가 MJPEG 로 따로 들고 있고(진단용), 이 화면에는 얹지 않는다.
-                <div style={{ position: "relative", lineHeight: 0 }}>
+                <div style={{ position: "relative", lineHeight: 0, height: "100%" }}>
                   <canvas ref={canvasRef} width={480} height={720}
                           style={{
-                            display: "block", width: "100%", height: "auto",
+                            ...mediaFill,
                             opacity: paused ? 0.3 : 1,
                             transition: "opacity .2s",
                           }} />
@@ -510,7 +429,7 @@ export default function Live() {
               ) : videoBroken ? (
                 // 영상 파일이 아직 없을 때(개발 중) 깨진 재생기 대신 안내를 보여준다.
                 <div style={{
-                  aspectRatio: "9 / 16", maxHeight: 520, display: "flex",
+                  height: "100%", display: "flex",
                   flexDirection: "column", alignItems: "center", justifyContent: "center",
                   gap: 10, padding: 24, textAlign: "center",
                 }}>
@@ -526,7 +445,7 @@ export default function Live() {
                 <video src={DEMO_VIDEO_SRC} poster={DEMO_POSTER_SRC}
                        controls autoPlay muted loop playsInline
                        onError={() => setVideoBroken(true)}
-                       style={{ display: "block", width: "100%", height: "auto" }} />
+                       style={mediaFill} />
               )}
               <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 6 }}>
                 <Badge tone={paused ? "muted" : on ? "live" : "demo"}>
@@ -582,8 +501,10 @@ export default function Live() {
               <Person size={16} color={color.brand} />
               <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
                 <b>발끝부터 머리까지</b> 카메라 화면 안에 모두 들어와야 자세를
-                정확히 인식합니다. 몸의 일부가 잘리면 감지가 어려우니,
-                카메라 위치를 고정한 뒤 다시 시작해 주세요.
+                정확히 인식합니다.
+                <br />
+                몸의 일부가 잘리면 감지가 어려우니, 카메라 위치를 고정한 뒤
+                다시 시작해 주세요.
               </span>
             </Card>
           )}
@@ -592,7 +513,8 @@ export default function Live() {
               <Wifi size={16} color={color.brand} />
               <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
                 지금은 녹화된 데모 영상입니다.
-                <b> 전시 부스에 방문하시면 카메라를 직접 연결해</b> 실시간 낙상 감지와
+                <br />
+                <b>전시 부스에 방문하시면 카메라를 직접 연결해</b> 실시간 낙상 감지와
                 타일 작동을 체험하실 수 있습니다.
               </span>
             </Card>

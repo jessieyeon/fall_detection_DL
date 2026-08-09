@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  adminMeta, createResident, deleteCamera, deleteResident, getFacility,
+  adminMeta, createResident, deleteCamera, deleteResident,
   listCameras, listResidents, logout, registerCamera, scanCameras,
-  setFacility, updateCamera,
-  type Camera, type Facility, type FoundDevice, type Resident, type User,
+  updateCamera,
+  type Camera, type FoundDevice, type Resident, type User,
 } from "../api";
 import { color, font, radius } from "../theme";
 import { useIsMobile } from "../useMedia";
@@ -108,86 +108,6 @@ function loadPostcode(): Promise<void> {
     s.onerror = () => rej(new Error("주소 검색을 불러오지 못했습니다"));
     document.head.appendChild(s);
   });
-}
-
-function AddressCard() {
-  const [f, setF] = useState<Facility | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => { getFacility().then(setF).catch(() => {}); }, []);
-  if (!f) return null;
-
-  const search = async () => {
-    setError("");
-    try {
-      await loadPostcode();
-      new window.daum!.Postcode({
-        oncomplete: (d) => {
-          const addr = d.roadAddress || d.jibunAddress;
-          setF((prev) => prev && {
-            ...prev,
-            address: addr,
-            // 건물명이 있으면 이름 칸을 비워두지 않는다 — 대부분의 경우
-            // 사용자가 치려던 값과 같다. 마음에 안 들면 고치면 된다.
-            facility_name: prev.facility_name || d.buildingName || "",
-          });
-        },
-      }).open();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const save = async () => {
-    setError("");
-    try {
-      await setFacility({ facility_name: f.facility_name, address: f.address });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  return (
-    <Card style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <p style={{ margin: 0, fontSize: font.small, color: color.inkSoft, lineHeight: 1.6 }}>
-        낙상이 감지되면 이 주소로 도움을 요청할 수 있도록 준비해 둡니다.
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        <span style={{ fontSize: font.caption, color: color.inkFaint, fontWeight: 600 }}>
-          주소
-        </span>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input readOnly value={f.address} placeholder="주소 검색을 눌러 주세요"
-                 onClick={search}
-                 style={{ ...inputStyle, cursor: "pointer", background: color.bg }} />
-          <Button variant="outline" onClick={search}
-                  icon={<MapPin size={14} color={color.brand} />}
-                  style={{ flexShrink: 0 }}>
-            주소 검색
-          </Button>
-        </div>
-      </div>
-
-      <Field label="건물·시설 이름" placeholder="예) 다온실버타운"
-             value={f.facility_name}
-             onChange={(e: { target: { value: string } }) =>
-               setF({ ...f, facility_name: e.target.value })} />
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Button onClick={save}>저장</Button>
-        {saved && (
-          <span style={{ fontSize: font.small, color: color.green, fontWeight: 600 }}>
-            저장했습니다
-          </span>
-        )}
-      </div>
-      <ErrorText>{error}</ErrorText>
-    </Card>
-  );
 }
 
 // ── 나의 카메라 ───────────────────────────────────────────────────────
@@ -443,7 +363,8 @@ function CameraSection({ residents }: { residents: Resident[] }) {
 function ResidentSection({ residents, reload }:
                          { residents: Resident[]; reload: () => void }) {
   const mobile = useIsMobile();
-  const [form, setForm] = useState({ name: "", age: "", room: "", phone: "", note: "" });
+  const empty = { name: "", age: "", room: "", phone: "", note: "", address: "" };
+  const [form, setForm] = useState(empty);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
 
@@ -454,10 +375,26 @@ function ResidentSection({ residents, reload }:
         name: form.name,
         age: form.age ? Number(form.age) : null,
         room: form.room, phone: form.phone, note: form.note,
+        address: form.address,
       });
-      setForm({ name: "", age: "", room: "", phone: "", note: "" });
+      setForm(empty);
       setOpen(false);
       reload();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  // 시설 주소와 같은 카카오 우편번호 검색을 쓴다. 직접 타이핑한 주소는
+  // 오타·비표준 표기가 섞여 119 지원 화면에서 그대로 읽기 어렵다.
+  const searchAddress = async () => {
+    setError("");
+    try {
+      await loadPostcode();
+      new window.daum!.Postcode({
+        oncomplete: (d) => setForm((prev) =>
+          ({ ...prev, address: d.roadAddress || d.jibunAddress })),
+      }).open();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -500,6 +437,9 @@ function ResidentSection({ residents, reload }:
               {r.note && (
                 <div style={{ fontSize: font.caption, color: color.inkSoft }}>{r.note}</div>
               )}
+              {r.address && (
+                <div style={{ fontSize: font.caption, color: color.inkFaint }}>{r.address}</div>
+              )}
               <Button variant="ghost" style={{ alignSelf: "flex-start", color: color.red }}
                       onClick={() => remove(r)}>
                 삭제
@@ -537,6 +477,23 @@ function ResidentSection({ residents, reload }:
                    onChange={(e: { target: { value: string } }) =>
                      setForm({ ...form, note: e.target.value })} />
           </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={{ fontSize: font.caption, color: color.inkFaint, fontWeight: 600 }}>
+              주소 <span style={{ fontWeight: 400 }}>
+                (선택 — 시설 밖에 거주하시면 입력, 비우면 시설 주소로 신고 지원)
+              </span>
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input readOnly value={form.address} placeholder="주소 검색을 눌러 주세요"
+                     onClick={searchAddress}
+                     style={{ ...inputStyle, cursor: "pointer", background: color.bg }} />
+              <Button variant="outline" onClick={searchAddress}
+                      icon={<MapPin size={14} color={color.brand} />}
+                      style={{ flexShrink: 0 }}>
+                주소 검색
+              </Button>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <Button onClick={add}>추가</Button>
             <Button variant="ghost" onClick={() => setOpen(false)}>취소</Button>
@@ -564,10 +521,9 @@ export default function MyPage({ user, onLogout }: { user: User; onLogout: () =>
         <AccountCard user={user} onLogout={onLogout} />
       </Section>
 
-      <Section title="주소 입력">
-        <AddressCard />
-      </Section>
-
+      {/* 시설 주소 입력 카드는 뺐다. 주소는 어르신마다 다를 수 있어(시설 밖
+          거주 등) '어르신 정보'의 개별 주소로 일원화했다. 시설 주소를 쓰던
+          119 지원은 개별 주소가 비었을 때만 시설 값을 쓰도록 남아 있다. */}
       <CameraSection residents={residents} />
 
       <ResidentSection residents={residents} reload={reload} />

@@ -4,6 +4,8 @@ export interface Facility { name: string; facility_name: string; address: string
 export interface Resident {
   id: number; name: string; age: number | null;
   room: string; phone: string; note: string;
+  /** 개별 주소(선택). 비어 있으면 신고 지원이 시설 주소를 쓴다. */
+  address: string;
 }
 export interface Camera {
   id: number; name: string; location: string; device_key: string;

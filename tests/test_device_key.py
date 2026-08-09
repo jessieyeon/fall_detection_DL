@@ -37,7 +37,13 @@ def test_registered_camera_goes_online_after_signal(env):
 
     cams = {c["device_key"]: c for c in admin.get("/api/admin/cameras").json()}
     assert cams["daon-cam-lounge-1"]["online"] is True
-    assert cams["daon-cam-302"]["online"] is False      # 신호 없는 카메라는 그대로
+
+    # 신호 없는 카메라는 그대로 오프라인. 시드에는 한 대뿐이라 직접 만든다.
+    admin.post("/api/admin/cameras",
+               json={"device_key": "daon-cam-quiet", "name": "3층 복도",
+                     "location": "복도"})
+    cams = {c["device_key"]: c for c in admin.get("/api/admin/cameras").json()}
+    assert cams["daon-cam-quiet"]["online"] is False
 
 
 def test_unknown_device_shows_up_in_scan(env):

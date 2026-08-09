@@ -94,24 +94,26 @@ registry = DiscoveryRegistry()
 
 # ── 입주민 ────────────────────────────────────────────────────────────
 
-_RESIDENT_FIELDS = ("name", "age", "room", "phone", "note")
+_RESIDENT_FIELDS = ("name", "age", "room", "phone", "note", "address")
 
 
 def list_residents(conn, admin_id):
     rows = conn.execute(
-        "SELECT id, name, age, room, phone, note FROM residents "
+        "SELECT id, name, age, room, phone, note, address FROM residents "
         "WHERE admin_id = ? ORDER BY room, name", (admin_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def create_resident(conn, admin_id, name, age=None, room="", phone="", note=""):
+def create_resident(conn, admin_id, name, age=None, room="", phone="", note="",
+                    address=""):
     name = (name or "").strip()
     if not name:
         raise ValueError("이름은 비워둘 수 없습니다")
     cur = conn.execute(
-        "INSERT INTO residents (admin_id, name, age, room, phone, note) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (admin_id, name, age, room.strip(), phone.strip(), note.strip()))
+        "INSERT INTO residents (admin_id, name, age, room, phone, note, address) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (admin_id, name, age, room.strip(), phone.strip(), note.strip(),
+         address.strip()))
     conn.commit()
     return cur.lastrowid
 
@@ -270,19 +272,27 @@ def dispatch_info(conn, camera_id):
     row = conn.execute(
         "SELECT c.id, c.name AS camera_name, c.location, "
         "       u.facility_name, u.address, "
-        "       r.id AS resident_id, r.name AS resident_name, r.age, r.room, r.phone "
+        "       r.id AS resident_id, r.name AS resident_name, r.age, r.room, "
+        "       r.phone, r.address AS resident_address "
         "FROM cameras c JOIN users u ON u.id = c.admin_id "
         "LEFT JOIN residents r ON r.id = c.resident_id "
         "WHERE c.id = ?", (camera_id,)).fetchone()
     if row is None:
         return None
     d = dict(row)
-    parts = [p for p in (d["address"], d["facility_name"]) if p]
-    if d["room"]:
-        parts.append(d["room"])
+    if d.get("resident_address"):
+        # 개별 주소가 있는 어르신(시설 밖 거주)은 그 주소가 곧 출동지다.
+        # 시설 주소를 섞으면 구급대가 엉뚱한 곳으로 간다.
+        parts = [d["resident_address"]]
+        if d["room"]:
+            parts.append(d["room"])
     else:
-        # 공용공간이면 호실이 없다. 어디인지는 설치 공간과 카메라 이름으로 좁힌다.
-        parts.append(f"{d['location']} ({d['camera_name']})")
+        parts = [p for p in (d["address"], d["facility_name"]) if p]
+        if d["room"]:
+            parts.append(d["room"])
+        else:
+            # 공용공간이면 호실이 없다. 어디인지는 설치 공간과 카메라 이름으로 좁힌다.
+            parts.append(f"{d['location']} ({d['camera_name']})")
     d["dispatch_address"] = " ".join(parts)
     d["identified"] = d["resident_id"] is not None
     return d

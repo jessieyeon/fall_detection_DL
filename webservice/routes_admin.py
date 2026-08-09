@@ -30,6 +30,7 @@ class ResidentBody(BaseModel):
     room: str = ""
     phone: str = ""
     note: str = ""
+    address: str = ""          # 개별 주소(선택). 있으면 신고 지원이 이걸 쓴다
 
 
 class ResidentPatch(BaseModel):
@@ -38,6 +39,7 @@ class ResidentPatch(BaseModel):
     room: Optional[str] = None
     phone: Optional[str] = None
     note: Optional[str] = None
+    address: Optional[str] = None
 
 
 class CameraBody(BaseModel):
@@ -114,7 +116,8 @@ def post_resident(body: ResidentBody, user=Depends(current_user)):
     conn = _conn()
     try:
         rid = cameras.create_resident(
-            conn, user["id"], body.name, body.age, body.room, body.phone, body.note)
+            conn, user["id"], body.name, body.age, body.room, body.phone,
+            body.note, body.address)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     finally:

@@ -10,22 +10,22 @@ from webservice import auth, db
 ADMIN_EMAIL = "admin@daon.com"
 ADMIN_PW = "pw"
 
-_FACILITY_NAME = "다온실버타운"
-_FACILITY_ADDRESS = "서울특별시 서대문구 연세로 50"
+# 시설명·주소는 비워둔다. 관람객이 처음 열었을 때 남의 시설 정보가 채워져
+# 있으면 '내가 입력하는 화면'이 아니라 '남의 계정'처럼 보인다 — 주소 검색을
+# 직접 눌러보게 하는 것이 체험의 일부다.
+_FACILITY_NAME = ""
+_FACILITY_ADDRESS = ""
 
+# 표본은 흐름을 보여줄 최소한만 둔다: 입주민 1명, 카메라 1대.
+# 실제 파이프라인이 붙는 daon-cam-lounge-1 을 남긴 이유는 모듈 독스트링 참고.
 # (이름, 나이, 호실, 연락처, 비고)
 _RESIDENTS = [
     ("김순자", 82, "302호", "010-0000-0001", "보행 보조기 사용"),
-    ("박영수", 78, "305호", "010-0000-0002", ""),
-    ("이말순", 85, "411호", "010-0000-0003", "야간 화장실 출입 잦음"),
 ]
 
 # (이름, 설치 공간, device_key, 연결할 입주민 이름 또는 None)
 _CAMERAS = [
-    ("302호 세대", "세대 내부", "daon-cam-302", "김순자"),
-    ("411호 세대", "세대 내부", "daon-cam-411", "이말순"),
     ("1층 라운지", "공용 라운지", "daon-cam-lounge-1", None),
-    ("3층 복도", "복도", "daon-cam-hall-3", None),
 ]
 
 
@@ -37,12 +37,14 @@ def seed_demo(path=db.DB_PATH):
                            (ADMIN_EMAIL,)).fetchone()
         if row is None:
             admin_id = auth.create_user(conn, ADMIN_EMAIL, ADMIN_PW, "admin", "김관리자")
+            # 시설 정보는 계정을 처음 만들 때만 넣는다. 매 실행마다 UPDATE 하면
+            # (서버는 재시작마다 seed 를 돌린다) 관리자가 입력해 둔 주소가
+            # 재시작 때마다 시드값으로 되돌아간다.
+            conn.execute(
+                "UPDATE users SET facility_name = ?, address = ? WHERE id = ?",
+                (_FACILITY_NAME, _FACILITY_ADDRESS, admin_id))
         else:
             admin_id = row["id"]
-
-        conn.execute(
-            "UPDATE users SET facility_name = ?, address = ? WHERE id = ?",
-            (_FACILITY_NAME, _FACILITY_ADDRESS, admin_id))
 
         resident_ids = {}
         for name, age, room, phone, note in _RESIDENTS:
