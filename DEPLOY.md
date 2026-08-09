@@ -186,7 +186,7 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ```bash
 # 영상을 webservice/frontend/public/samples/ 에 넣고
-#   bedroom.mp4 / living.mp4 / kitchen.mp4
+#   unit.mp4 / lounge.mp4 / corridor.mp4
 python3 scripts/build_samples.py --auto
 ```
 

@@ -53,6 +53,10 @@ def parse_args():
                         help="다온 웹플랫폼 실시간 중계 URL (예: http://localhost:8000). "
                              "지정하면 감지 결과를 플랫폼으로 중계한다(--webapp 대체). "
                              "인제스트 토큰은 LIVE_INGEST_TOKEN 환경변수(기본 daon-live)")
+    parser.add_argument("--device-key", default=None,
+                        help="이 카메라의 식별자 (예: daon-cam-lounge-1). 관리자 화면의 "
+                             "'주변 카메라 찾기'에 이 값으로 나타나고, 등록돼 있으면 "
+                             "온라인으로 표시된다. DAON_DEVICE_KEY 환경변수로도 지정 가능")
     return parser.parse_args()
 
 
@@ -126,7 +130,7 @@ def main():
         # 다온 웹플랫폼으로 중계. WebAppServer 와 같은 인터페이스라 아래 루프의
         # push_pose/push_fall/push_reset 호출은 그대로 동작한다.
         from webservice import live_bridge
-        webapp = live_bridge.LiveBridge(args.live_url)
+        webapp = live_bridge.LiveBridge(args.live_url, device_key=args.device_key)
         if not webapp.start():
             webapp.stop()
             webapp = None

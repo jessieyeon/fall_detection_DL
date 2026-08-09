@@ -180,7 +180,7 @@ def app(tmp_path, monkeypatch):
     from webservice import db, auth, app as app_module
     db.init_db(dbfile)
     conn = db.connect(dbfile)
-    auth.create_user(conn, "s@d.com", "pw", "senior", "어르신")
+    auth.create_user(conn, "s@d.com", "pw", "admin", "관리자")
     conn.close()
     return app_module.app
 

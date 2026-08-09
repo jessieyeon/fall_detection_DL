@@ -6,27 +6,29 @@ import {
 import { color, font, radius } from "../theme";
 import { useIsMobile } from "../useMedia";
 import { notifyDone, primeNotifications, stopTitleFlash } from "../notify";
-import { getFlag, setFlag } from "../storage";
 import { Video, Alert, Check, Chevron } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Section from "../ui/Section";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
-import Tour from "../ui/Tour";
 
-const TOUR_SEEN = "daon.tour.seen";
 
 /**
  * 체험용 샘플 영상. 파일은 webservice/frontend/public/samples/ 에 둔다.
  * 온라인 관람객은 집 영상을 갖고 있지 않으므로 이걸 바로 고를 수 있어야 한다.
  */
 const SAMPLES = [
-  { id: "bedroom", label: "안방", desc: "화장실을 오가는 야간 동선", file: "/samples/bedroom.mp4" },
-  { id: "living", label: "거실", desc: "가장 자주 지나다니는 공간", file: "/samples/living.mp4" },
-  { id: "kitchen", label: "부엌", desc: "조리 중 반복되는 짧은 이동", file: "/samples/kitchen.mp4" },
+  { id: "unit", label: "세대 내부", desc: "밤에 화장실을 오가는 동선", file: "/samples/unit.mp4" },
+  // 설명은 '동선' 기준으로 쓴다. 우리 분석은 머문 시간이 아니라 지나간 횟수를
+  // 보기 때문에(consulting/rules.py), '앉았다 일어서기' 같은 체류 묘사를 쓰면
+  // 결과 화면과 말이 어긋난다.
+  { id: "lounge", label: "공용 라운지", desc: "여러 사람의 동선이 겹치는 곳", file: "/samples/lounge.mp4" },
+  { id: "corridor", label: "복도", desc: "가장 자주 지나다니는 이동 경로", file: "/samples/corridor.mp4" },
 ];
 
-const ROOMS = ["거실", "안방", "부엌", "화장실", "현관", "기타"];
+// 서버의 db.LOCATIONS 와 같은 값이어야 한다. 카메라 등록 화면은 /api/admin/meta 로
+// 받아 쓰지만, 컨설팅은 로그인 전 체험에서도 열리므로 여기서는 상수로 둔다.
+const ROOMS = ["세대 내부", "공용 라운지", "복도", "기타"];
 
 const levelSkin = (lvl?: string) =>
   lvl === "높음" ? { fg: color.red, bg: color.redTint }
@@ -35,11 +37,13 @@ const levelSkin = (lvl?: string) =>
 
 const STEPS = ["영상 업로드", "사람 인식", "동선 추출", "위험 구역 판정"];
 
-export default function Consulting() {
+// 앱 소개(Tour)는 App 레벨에서 띄운다 — 어느 화면으로 들어와도 처음 한 번은
+// 보여야 하기 때문이다. 여기서는 다시 열어달라는 요청만 위로 넘긴다.
+export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
   const mobile = useIsMobile();
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [active, setActive] = useState<Report | null>(null);
-  const [room, setRoom] = useState("거실");
+  const [room, setRoom] = useState(ROOMS[0]);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState(0);
   // 실패한 단계 번호. null 이 아니면 진행 바가 그 단계에서 빨갛게 멈춘다.
@@ -50,10 +54,7 @@ export default function Consulting() {
   const [showList, setShowList] = useState(false);
   const [showEvidence, setShowEvidence] = useState(false);
   const [ready, setReady] = useState<Set<string> | null>(null);   // null=확인 중
-  const [showTour, setShowTour] = useState(() => getFlag(TOUR_SEEN) !== "1");
   const [sampleTab, setSampleTab] = useState<string>(SAMPLES[0].id);
-
-  const closeTour = () => { setShowTour(false); setFlag(TOUR_SEEN, "1"); };
 
   const loadList = () => consultingReports().then(setReports).catch(() => {});
   const open = async (rid: number) => setActive(await consultingReport(rid));
@@ -171,15 +172,13 @@ export default function Consulting() {
         alignItems: "flex-start", gap: 12,
       }}>
         <h1 style={{ margin: 0, fontSize: font.h1, fontWeight: 700 }}>동선 컨설팅</h1>
-        <button onClick={() => setShowTour(true)} style={{
+        <button onClick={onOpenTour} style={{
           flexShrink: 0, fontSize: font.caption, color: color.brand,
           fontWeight: 600, padding: "3px 8px",
         }}>
           앱 소개
         </button>
       </div>
-
-      {showTour && <Tour onClose={closeTour} />}
 
       {/* 샘플 선택 — 탭으로 방을 고르고, 영상을 직접 본 뒤 분석을 누른다.
           무엇을 분석하는지 눈으로 확인한 다음 결과를 봐야 체험이 이해된다. */}

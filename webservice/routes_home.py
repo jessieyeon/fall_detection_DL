@@ -1,38 +1,25 @@
-"""평면도 매칭과 근처 병원 라우트."""
+"""근처 병원 조회 라우트.
 
-import json
-import os
+낙상 알림에서 '119 신고 지원' 화면을 열 때, 시설 주소를 좌표로 바꿔 주변 병원을
+함께 보여주는 데 쓴다. 아파트 평면도 매칭 기능이 여기 같이 있었으나 실버타운으로
+무대를 옮기면서 제거했다(가정집 평면도가 시설 서사와 맞지 않고, 화면에서 호출한
+적도 없다).
+"""
+
 from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
 
 from webservice import db, hospitals
 from webservice.routes_auth import current_user
 
 router = APIRouter(prefix="/api/home")
 
-_FLOORPLAN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                              "data", "floorplans")
-
 
 def _client_factory():
     # 테스트에서 MockTransport 클라이언트로 교체하는 지점.
     return httpx.Client(timeout=5)
-
-
-def _manifest():
-    with open(os.path.join(_FLOORPLAN_DIR, "manifest.json"), encoding="utf-8") as f:
-        return json.load(f)
-
-
-@router.get("/floorplan")
-def floorplan(apartment: str = Query(...)):
-    filename = _manifest().get(apartment)
-    if not filename:
-        raise HTTPException(status_code=404, detail="평면도를 찾을 수 없습니다")
-    return FileResponse(os.path.join(_FLOORPLAN_DIR, filename))
 
 
 @router.get("/hospitals")

@@ -49,11 +49,11 @@ def test_lookup_hit_returns_entry(tmp_path, monkeypatch):
     monkeypatch.setattr(cache, "SAMPLE_DIR", str(tmp_path))
 
     manifest = {cache.file_sha256(video): {
-        "location": "안방", "findings": {"summary": "s"}, "image": "sample.png",
+        "location": "세대 내부", "findings": {"summary": "s"}, "image": "sample.png",
     }}
     hit = cache.lookup(video, manifest=manifest)
     assert hit is not None
-    assert hit["location"] == "안방"
+    assert hit["location"] == "세대 내부"
     assert hit["image"] == image
 
 
@@ -67,18 +67,18 @@ def test_lookup_ignores_entry_whose_image_is_gone(tmp_path, monkeypatch):
     video = _write(os.path.join(tmp_path, "sample.mp4"))
     monkeypatch.setattr(cache, "SAMPLE_DIR", str(tmp_path))
     manifest = {cache.file_sha256(video): {
-        "location": "거실", "findings": {}, "image": "does-not-exist.png",
+        "location": "공용 라운지", "findings": {}, "image": "does-not-exist.png",
     }}
     assert cache.lookup(video, manifest=manifest) is None
 
 
 def test_save_and_load_roundtrip(tmp_path):
     p = os.path.join(tmp_path, "sub", "manifest.json")
-    entries = {"abc": {"location": "부엌", "findings": {"summary": "요약"}, "image": "k.png"}}
+    entries = {"abc": {"location": "복도", "findings": {"summary": "요약"}, "image": "k.png"}}
     cache.save_manifest(entries, p)
 
     with open(p, encoding="utf-8") as f:
         raw = f.read()
-    assert "부엌" in raw          # 한글이 이스케이프되지 않고 저장돼 사람이 읽을 수 있다
+    assert "복도" in raw          # 한글이 이스케이프되지 않고 저장돼 사람이 읽을 수 있다
     assert json.loads(raw) == entries
     assert cache.load_manifest(p) == entries

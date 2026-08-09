@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { color, font, radius } from "../theme";
-import { Video, Wifi, Alert, MapPin, Pause, Play } from "../ui/icons";
+import { Video, Wifi, Alert, MapPin, Pause, Play, Person } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import SelfCam from "./SelfCam";
+import { useIsMobile } from "../useMedia";
+import { listCameras } from "../api";
 
 /**
  * 데모 영상 경로. 영상 파일은 별도 제공 예정이므로 경로만 상수로 둔다.
@@ -13,7 +15,9 @@ import SelfCam from "./SelfCam";
 const DEMO_VIDEO_SRC = "/demo/fall-detection-demo.mp4";
 const DEMO_POSTER_SRC = "/demo/fall-detection-demo.jpg";
 
-/** 감지 파이프라인이 밀어넣는 카메라 영상(MJPEG). main.py --live-url 이 채운다. */
+/** 감지 파이프라인이 밀어넣는 카메라 영상(MJPEG). main.py --live-url 이 채운다.
+ *  화면에는 스켈레톤만 그리므로 지금은 쓰지 않고, 진단용으로만 남겨둔다.
+ *  카메라를 고를 때는 `?device=<기기키>` 를 붙인다. */
 const STREAM_SRC = "/api/live/stream.mjpg";
 
 const CONNECTIONS: [number, number][] = [
@@ -21,7 +25,6 @@ const CONNECTIONS: [number, number][] = [
   [11, 23], [12, 24], [23, 24],
   [23, 25], [25, 27], [24, 26], [26, 28],
 ];
-const LOCATIONS = ["거실", "침실", "주방", "화장실"];
 const FLOOR_TOP = 0.6;
 
 /** 연결 진단 패널을 보여줄지. 개발 서버이거나 ?diag=1 을 붙였을 때만 켠다.
@@ -38,7 +41,8 @@ type Stage = "idle" | "searching" | "none" | "demo" | "self";
  * 핸드셰이크와 첫 포즈 수신까지 기다려야 해서, 실제로 파이프라인이 돌고 있는데도
  * 타임아웃에 걸려 '카메라 없음'으로 빠진다. */
 function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
-                     pausedRef: React.RefObject<boolean>) {
+                     pausedRef: React.RefObject<boolean>,
+                     deviceRef: React.RefObject<string>) {
   const stateRef = useRef<LiveState>({ landmarks: null, tiles: [], rows: 2, cols: 2 });
   const lastPose = useRef<number | null>(null);
 
@@ -53,6 +57,10 @@ function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
       ws.onclose = () => { if (mounted) retryTimer = setTimeout(connect, 1500); };
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
+        // 여러 카메라가 같은 소켓으로 들어온다. 지금 보고 있는 것만 그린다.
+        // device 가 없는 메시지는 익명 파이프라인(기존 실행 방식)이라 항상 받는다.
+        const dev = deviceRef.current ?? "";
+        if (m.device && dev && m.device !== dev) return;
         const s = stateRef.current;
         if (m.type === "pose") { s.landmarks = m.landmarks; lastPose.current = Date.now(); }
         else if (m.type === "fall") { s.tiles = m.tiles || []; s.rows = m.rows || s.rows; s.cols = m.cols || s.cols; }
@@ -71,8 +79,8 @@ function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
         const { width: W, height: H } = cv;
         const s = stateRef.current;
 
-        // 배경: 카메라 원본 대신 어두운 그라디언트. 영상을 그대로 보여주지 않는 것이
-        // 제품의 약속(자세만 보고 영상은 저장하지 않는다)이라, 화면도 그걸 따른다.
+        // 배경: 카메라 원본 대신 어두운 그라디언트. 스켈레톤과 타일만 그리므로
+        // 대비가 높은 어두운 바탕이 읽기 좋다.
         const bg = ctx.createLinearGradient(0, 0, 0, H);
         bg.addColorStop(0, "#101623");
         bg.addColorStop(1, "#1A2438");
@@ -154,15 +162,19 @@ function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
   return lastPose;
 }
 
-type Diag = { reachable: boolean; frames: number; streaming: boolean; paused: boolean };
+type Diag = {
+  reachable: boolean; frames: number; streaming: boolean; paused: boolean;
+  /** 지금 영상이 들어오고 있는 카메라 목록 */
+  devices: string[];
+};
 
 /** 카메라 연결을 끊거나 다시 잇는다. 실제로 장치를 놓는 것은 감지 파이프라인이고,
  *  여기서는 서버에 의사만 남긴다(파이프라인이 0.5초마다 가져간다). */
-async function setCameraPaused(paused: boolean) {
+async function setCameraPaused(paused: boolean, device: string) {
   const r = await fetch("/api/live/control", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paused }),
+    body: JSON.stringify({ paused, device }),
   });
   if (!r.ok) throw new Error("카메라 제어에 실패했습니다");
   return (await r.json()).paused as boolean;
@@ -172,9 +184,9 @@ async function setCameraPaused(paused: boolean) {
  *
  * WebSocket 과 별개의 신호라, 'ws 는 막혔는데 파이프라인은 도는' 경우를 잡아낸다.
  * 실패 원인을 화면에 그대로 보여주기 위한 진단 용도이기도 하다. */
-function useServerStatus(): Diag {
+function useServerStatus(device: string): Diag {
   const [diag, setDiag] = useState<Diag>({
-    reachable: true, frames: 0, streaming: false, paused: false,
+    reachable: true, frames: 0, streaming: false, paused: false, devices: [],
   });
   const prev = useRef<{ frames: number; at: number } | null>(null);
 
@@ -182,16 +194,18 @@ function useServerStatus(): Diag {
     let alive = true;
     const poll = async () => {
       try {
-        const r = await fetch("/api/live/status", { cache: "no-store" });
+        const q = device ? `?device=${encodeURIComponent(device)}` : "";
+        const r = await fetch(`/api/live/status${q}`, { cache: "no-store" });
         if (!r.ok) throw new Error();
-        const { frames, paused } = await r.json();
+        const { frames, paused, stream_devices } = await r.json();
         if (!alive) return;
         const last = prev.current;
         // 프레임 수가 '늘고 있어야' 살아 있는 것이다. 값이 0이 아니어도
         // 멈춰 있으면 파이프라인이 종료된 뒤 남은 숫자일 뿐이다.
         const streaming = last != null && frames > last.frames;
         prev.current = { frames, at: Date.now() };
-        setDiag({ reachable: true, frames, streaming, paused: !!paused });
+        setDiag({ reachable: true, frames, streaming, paused: !!paused,
+                  devices: stream_devices ?? [] });
       } catch {
         if (alive) setDiag((d) => ({ ...d, reachable: false, streaming: false }));
       }
@@ -199,15 +213,15 @@ function useServerStatus(): Diag {
     poll();
     const id = setInterval(poll, 1500);
     return () => { alive = false; clearInterval(id); };
-  }, []);
+  }, [device]);
 
   return diag;
 }
 
 export default function Live() {
+  const mobile = useIsMobile();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stage, setStage] = useState<Stage>("idle");
-  const [location, setLocation] = useState("거실");
   const [videoBroken, setVideoBroken] = useState(false);
   const [streamBroken, setStreamBroken] = useState(false);
   // 서버가 진실이지만 폴링이 1.5초라 눌렀을 때 즉시 반응하도록 잠깐 덮어쓴다.
@@ -224,8 +238,28 @@ export default function Live() {
       .catch(() => {});
   }, []);
 
-  const diag = useServerStatus();
+  // 보고 있는 카메라. 빈 문자열이면 '익명 파이프라인'(기기키 없이 띄운 경우).
+  const [device, setDevice] = useState("");
+  // device_key 는 사람이 읽을 값이 아니다(daon-cam-302). 등록된 이름·설치 공간을
+  // 가져와 화면에는 '3층 복도'처럼 보여준다.
+  const [cameraNames, setCameraNames] = useState<Record<string, string>>({});
+  const [cameraPlaces, setCameraPlaces] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    listCameras()
+      .then((cs) => {
+        setCameraNames(Object.fromEntries(cs.map((c) => [c.device_key, c.name])));
+        setCameraPlaces(Object.fromEntries(cs.map((c) => [c.device_key, c.location])));
+      })
+      .catch(() => {});
+  }, []);
+  const diag = useServerStatus(device);
   const paused = pendingPause ?? diag.paused;
+
+  // 카메라가 하나뿐이면 자동으로 그걸 보고 있게 한다 — 탭을 누르게 만들 이유가 없다.
+  useEffect(() => {
+    if (!device && diag.devices.length === 1) setDevice(diag.devices[0]);
+  }, [device, diag.devices]);
 
   // 서버가 우리 요청을 반영하면 임시 덮어쓰기를 푼다.
   useEffect(() => {
@@ -237,14 +271,17 @@ export default function Live() {
   const pausedRef = useRef(false);
   pausedRef.current = paused;
 
-  const lastPose = useLiveFeed(canvasRef, pausedRef);
+  const deviceRef = useRef("");
+  deviceRef.current = device;
+
+  const lastPose = useLiveFeed(canvasRef, pausedRef, deviceRef);
 
   async function togglePause() {
     const next = !paused;
     setControlError("");
     setPendingPause(next);
     try {
-      await setCameraPaused(next);
+      await setCameraPaused(next, device);
     } catch (err) {
       setPendingPause(null);
       setControlError((err as Error).message);
@@ -407,39 +444,46 @@ export default function Live() {
           </Card>
 
           <HowItConnects />
-
-          <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <MapPin size={16} color={color.brand} />
-            <span style={{ fontSize: font.small, color: color.ink }}>
-              전시 부스에서는 카메라와 충격 완화 타일이 실제로 작동합니다.
-            </span>
-          </Card>
         </>
       )}
 
       {stage === "demo" && (
         <>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontSize: font.caption, color: color.inkFaint, marginRight: 4 }}>
-              촬영 위치
-            </span>
-            {LOCATIONS.map((r) => (
-              <button key={r} onClick={() => setLocation(r)} style={{
-                padding: "5px 11px", fontSize: font.caption, fontWeight: 600,
-                borderRadius: 999, border: `1px solid ${location === r ? color.brand : color.line}`,
-                background: location === r ? color.brand : color.surface,
-                color: location === r ? color.white : color.inkSoft,
-              }}>
-                {r}
-              </button>
-            ))}
-          </div>
+          {/* 영상이 들어오고 있는 카메라가 둘 이상일 때만 선택지를 보여준다.
+              한 대뿐인데 탭이 있으면 고를 게 없는 선택지를 누르게 만든다. */}
+          {diag.devices.length > 1 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: font.caption, color: color.inkFaint, marginRight: 4 }}>
+                카메라
+              </span>
+              {diag.devices.map((d) => {
+                const on = d === device;
+                return (
+                  <button key={d} onClick={() => setDevice(d)} style={{
+                    padding: "5px 11px", fontSize: font.caption, fontWeight: 600,
+                    borderRadius: 999, border: `1px solid ${on ? color.brand : color.line}`,
+                    background: on ? color.brand : color.surface,
+                    color: on ? color.white : color.inkSoft,
+                  }}>
+                    {cameraNames[d] ?? d}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
+          {/* 데스크톱에서는 영상을 왼쪽에 작게 두고 안내를 오른쪽에 세운다.
+              세로 9:16 캔버스를 본문 폭에 꽉 채우면 화면을 넘겨서, 관람객이
+              스크롤해야만 안내를 볼 수 있었다. */}
+          <div style={{
+            display: "grid", gap: 14, alignItems: "start",
+            gridTemplateColumns: mobile ? "1fr" : "minmax(0, 300px) 1fr",
+          }}>
           <Card pad={0} style={{ overflow: "hidden" }}>
             <div style={{ position: "relative", background: "#0E1116" }}>
               {on ? (
-                // 카메라 원본은 보여주지 않는다. 자세(스켈레톤)만 캔버스에 그린다 —
-                // '영상을 저장하지 않고 자세만 본다'는 제품의 약속을 화면이 증명한다.
+                // 캔버스에는 자세(스켈레톤)와 바닥 타일만 그린다. 카메라 원본은
+                // 서버가 MJPEG 로 따로 들고 있고(진단용), 이 화면에는 얹지 않는다.
                 <div style={{ position: "relative", lineHeight: 0 }}>
                   <canvas ref={canvasRef} width={480} height={720}
                           style={{
@@ -488,7 +532,7 @@ export default function Live() {
                 <Badge tone={paused ? "muted" : on ? "live" : "demo"}>
                   {paused ? "연결 끊김" : on ? "LIVE" : "데모 영상"}
                 </Badge>
-                <Badge tone="muted">{location}</Badge>
+                <Badge tone="muted">{cameraPlaces[device] ?? cameraNames[device] ?? "카메라"}</Badge>
               </div>
 
               {on && (
@@ -512,6 +556,7 @@ export default function Live() {
             </div>
           </Card>
 
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {controlError && (
             <Card bg={color.redTint} style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <Alert size={16} color={color.red} />
@@ -534,10 +579,11 @@ export default function Live() {
 
           {on && !paused && (
             <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <Wifi size={16} color={color.brand} />
+              <Person size={16} color={color.brand} />
               <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
-                카메라 영상은 화면에 표시하거나 저장하지 않습니다.
-                AI가 인식한 <b>자세(스켈레톤)만</b> 실시간으로 보여드립니다.
+                <b>발끝부터 머리까지</b> 카메라 화면 안에 모두 들어와야 자세를
+                정확히 인식합니다. 몸의 일부가 잘리면 감지가 어려우니,
+                카메라 위치를 고정한 뒤 다시 시작해 주세요.
               </span>
             </Card>
           )}
@@ -551,11 +597,15 @@ export default function Live() {
               </span>
             </Card>
           )}
+
+          </div>
+          </div>
         </>
       )}
     </AppShell>
   );
 }
+
 
 /** 카메라가 어떻게 붙는지에 대한 설명. 관람객이 가장 많이 묻는 질문("와이파이인가요?
  *  블루투스인가요? 선을 꽂나요?")이라 '연결 실패' 화면에 붙여 둔다.
@@ -564,8 +614,8 @@ function HowItConnects() {
   const steps = [
     { n: "1", t: "카메라를 집 와이파이에 연결합니다",
       d: "다온 카메라는 인터넷(와이파이)으로 연결됩니다. 블루투스나 컴퓨터에 꽂는 선은 필요하지 않습니다." },
-    { n: "2", t: "카메라가 자세만 읽어 보냅니다",
-      d: "촬영된 영상은 집 밖으로 나가지 않습니다. AI가 알아본 관절 위치(자세)만 전달됩니다." },
+    { n: "2", t: "AI가 자세를 읽고 위험을 판단합니다",
+      d: "사람이 지나가면 관절 위치를 알아보고, 넘어질 위험이 있는지 매 순간 판단합니다. 위험이 감지되면 넘어지는 방향의 타일이 즉시 펴집니다." },
     { n: "3", t: "이 화면에 자동으로 나타납니다",
       d: "연결된 카메라는 따로 설정하지 않아도 목록에 뜹니다. 앱에서 언제든 연결을 끊을 수 있습니다." },
   ];
@@ -588,13 +638,6 @@ function HowItConnects() {
           </div>
         </div>
       ))}
-      <div style={{
-        fontSize: font.caption, color: color.inkSoft, lineHeight: 1.6,
-        paddingTop: 10, borderTop: `1px solid ${color.line}`,
-      }}>
-        바닥에 까는 <b>충격 완화 타일</b>은 카메라와 짧은 선으로 이어집니다.
-        낙상이 감지되면 넘어지는 방향의 타일이 즉시 펴집니다.
-      </div>
     </Card>
   );
 }

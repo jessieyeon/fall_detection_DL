@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """체험용 샘플 영상을 미리 분석해 캐시를 만든다.
 
-    python3 scripts/build_samples.py 안방=samples/bedroom.mp4 \
-                                     거실=samples/living.mp4 \
-                                     부엌=samples/kitchen.mp4
+    python3 scripts/build_samples.py 세대\ 내부=samples/unit.mp4 \
+                                     공용\ 라운지=samples/lounge.mp4 \
+                                     복도=samples/corridor.mp4
 
 또는 프런트 public 폴더의 표준 위치에서 자동으로 찾기:
 
@@ -33,7 +33,8 @@ from webservice.consulting import cache, heatmap, rules  # noqa: E402
 PUBLIC_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "webservice", "frontend", "public", "samples")
-AUTO = [("안방", "bedroom.mp4"), ("거실", "living.mp4"), ("부엌", "kitchen.mp4")]
+AUTO = [("세대 내부", "unit.mp4"), ("공용 라운지", "lounge.mp4"),
+        ("복도", "corridor.mp4")]
 
 
 def analyze_one(label, video_path):
@@ -76,7 +77,7 @@ def analyze_one(label, video_path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pairs", nargs="*", metavar="라벨=경로",
-                    help="예: 안방=samples/bedroom.mp4")
+                    help="예: 세대 내부=samples/unit.mp4")
     ap.add_argument("--auto", action="store_true",
                     help=f"{PUBLIC_DIR} 에서 표준 파일명을 찾는다")
     ap.add_argument("--clean", action="store_true", help="기존 캐시를 지우고 다시 만든다")

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSock
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from webservice import live, live_self
+from webservice import cameras, db, live, live_self
 
 router = APIRouter()
 manager = live.ConnectionManager()
@@ -30,6 +30,21 @@ def _ingest_token():
 def _check_token(token):
     if token != _ingest_token():
         raise HTTPException(status_code=401, detail="invalid ingest token")
+
+
+def _announce(device_key):
+    """파이프라인이 자기 존재를 알린다 — '주변 카메라 찾기'가 이걸로 채워진다.
+
+    device_key 는 선택이다. 붙이지 않고 띄우던 기존 실행 방식이 그대로 돌아야
+    하므로, 없으면 조용히 넘어간다.
+    """
+    if not device_key:
+        return
+    conn = db.connect()
+    try:
+        cameras.touch(conn, device_key)
+    finally:
+        conn.close()
 
 
 @router.websocket("/ws/live")
@@ -99,34 +114,38 @@ async def ws_live_self(websocket: WebSocket):
 
 
 @router.post("/api/live/event")
-async def live_event(message: dict, x_live_token: str = Header(default="")):
+async def live_event(message: dict, x_live_token: str = Header(default=""),
+                     x_device_key: str = Header(default="")):
     _check_token(x_live_token)
+    _announce(x_device_key)
     if message.get("type") not in _VALID_TYPES:
         raise HTTPException(status_code=400, detail="unknown event type")
     missing = [k for k in _REQUIRED[message["type"]] if k not in message]
     if missing:
         raise HTTPException(status_code=400, detail=f"missing fields: {missing}")
-    await manager.broadcast(message)
+    await manager.broadcast(live.with_device(message, x_device_key))
     return {"delivered": len(manager._clients)}
 
 
 @router.post("/api/live/frame")
-async def live_frame(request: Request, x_live_token: str = Header(default="")):
+async def live_frame(request: Request, x_live_token: str = Header(default=""),
+                     x_device_key: str = Header(default="")):
     """파이프라인이 보내는 카메라 프레임(JPEG). 최신 한 장만 보관한다."""
     _check_token(x_live_token)
+    _announce(x_device_key)
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="empty frame")
     if len(body) > MAX_FRAME_BYTES:
         raise HTTPException(status_code=413, detail="frame too large")
-    frames.put(body)
-    return {"ok": True, "seq": frames.seq}
+    seq = frames.put(body, x_device_key)
+    return {"ok": True, "seq": seq}
 
 
 @router.get("/api/live/frame.jpg")
-def latest_frame():
+def latest_frame(device: str = ""):
     """가장 최근 프레임 한 장. MJPEG 가 막히는 환경을 위한 폴백."""
-    _seq, jpeg = frames.get()
+    _seq, jpeg = frames.get(device)
     if jpeg is None:
         raise HTTPException(status_code=404, detail="아직 들어온 프레임이 없습니다")
     return Response(content=jpeg, media_type="image/jpeg",
@@ -134,7 +153,7 @@ def latest_frame():
 
 
 @router.get("/api/live/stream.mjpg")
-async def stream():
+async def stream(device: str = ""):
     """MJPEG 스트림. `<img src="...">` 에 그대로 꽂으면 영상이 재생된다.
 
     프레임마다 새 요청을 보내는 폴링과 달리 연결 하나로 계속 흘려보내므로
@@ -147,7 +166,7 @@ async def stream():
         last_seq = -1
         idle = 0.0
         while True:
-            seq, jpeg = frames.get()
+            seq, jpeg = frames.get(device)
             if jpeg is not None and seq != last_seq:
                 last_seq = seq
                 idle = 0.0
@@ -169,14 +188,22 @@ async def stream():
 
 
 @router.get("/api/live/status")
-def status():
-    """파이프라인이 붙어 있는지. 프런트가 카메라 연결 여부를 판단할 때 쓴다."""
-    return {"frames": frames.seq, "viewers": len(manager._clients),
-            "paused": control.paused}
+def status(device: str = ""):
+    """파이프라인이 붙어 있는지. 프런트가 카메라 연결 여부를 판단할 때 쓴다.
+
+    frames 는 전체 수신량(연결 여부 판단용), stream_devices 는 실제로 영상이
+    들어오고 있는 카메라 목록이다. 프런트는 후자로 선택 탭을 만든다.
+    """
+    seq, _jpeg = frames.get(device)
+    return {"frames": frames.seq, "device_frames": seq,
+            "stream_devices": frames.devices(),
+            "viewers": len(manager._clients),
+            "paused": control.paused_for(device)}
 
 
 class PauseBody(BaseModel):
     paused: bool
+    device: str = ""
 
 
 @router.post("/api/live/control")
@@ -188,11 +215,12 @@ def set_control(body: PauseBody, request: Request):
     """
     if request.session.get("user") is None:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다")
-    return {"paused": control.set_paused(body.paused)}
+    return {"paused": control.set_paused(body.paused, body.device)}
 
 
 @router.get("/api/live/control")
-def get_control(x_live_token: str = Header(default="")):
-    """파이프라인이 주기적으로 물어보는 지점."""
+def get_control(x_live_token: str = Header(default=""),
+                x_device_key: str = Header(default="")):
+    """파이프라인이 주기적으로 물어보는 지점. 자기 카메라 상태만 받아간다."""
     _check_token(x_live_token)
-    return {"paused": control.paused}
+    return {"paused": control.paused_for(x_device_key)}

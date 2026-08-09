@@ -30,7 +30,7 @@ def logged_in(client, tmp_path):
     db.init_db(db.DB_PATH)
     conn = db.connect()
     try:
-        auth.create_user(conn, "u@d.com", "pw", "guardian", "보호자")
+        auth.create_user(conn, "u@d.com", "pw", "admin", "관리자")
     finally:
         conn.close()
     client.post("/api/auth/login", json={"email": "u@d.com", "password": "pw"})

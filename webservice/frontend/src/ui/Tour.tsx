@@ -24,8 +24,9 @@ const STEPS: Step[] = [
   {
     title: "다온 안전지킴이 체험에 오신 것을 환영합니다",
     body: "다온 안전지킴이는 어르신의 안전한 일상을 위해 컨설팅과 실시간 감지를 "
-      + "제공하는 보호자용 앱입니다. 멀리 떨어져 있어도 어르신 곁의 위험을 "
-      + "확인하고 대비할 수 있어요. 주요 기능을 잠깐 안내해드릴게요.",
+      + "제공하는 시설 관리자용 앱입니다. 세대 내부부터 공용 라운지·복도까지, "
+      + "어르신이 지나다니는 곳의 위험을 미리 확인하고 대비할 수 있어요. "
+      + "주요 기능을 잠깐 안내해드릴게요.",
   },
   {
     target: "nav-consult",
@@ -123,11 +124,33 @@ export default function Tour({ onClose }: { onClose: () => void }) {
     width: rect.width + PAD * 2,
     height: rect.height + PAD * 2,
   };
-  // 말풍선은 대상이 화면 아래쪽이면 위에, 위쪽이면 아래에 둔다
-  const below = rect.top < window.innerHeight / 2;
-  const tipStyle: React.CSSProperties = below
-    ? { top: hole.top + hole.height + GAP }
-    : { bottom: window.innerHeight - hole.top + GAP };
+  // 말풍선 배치. '위쪽 대상이면 아래, 아래쪽 대상이면 위' 규칙만으로는
+  // 체험용 카드처럼 화면을 거의 다 채우는 대상에서 말풍선이 화면 밖으로
+  // 밀려난다 — 투어 중에는 배경 스크롤을 잠그므로 내려볼 수도 없다.
+  // 실제로 남는 공간을 재서 아래 → 위 → 좌측 → 화면 하단 고정 순으로 고른다.
+  const TIP_H = 200;                 // 말풍선 대략 높이(제목+본문 3줄+버튼)
+  const TIP_W = 340;                 // 좌측 배치일 때의 폭
+  const EDGE = 16;                   // 화면 가장자리 여백
+  const spaceBelow = window.innerHeight - (hole.top + hole.height);
+  const spaceAbove = hole.top;
+  const spaceLeft = hole.left;
+  const centered: React.CSSProperties = {
+    left: EDGE, right: EDGE, maxWidth: 420, margin: "0 auto",
+  };
+  const tipStyle: React.CSSProperties =
+    spaceBelow >= TIP_H + GAP
+      ? { ...centered, top: hole.top + hole.height + GAP }
+    : spaceAbove >= TIP_H + GAP
+      ? { ...centered, bottom: window.innerHeight - hole.top + GAP }
+    : spaceLeft >= TIP_W + GAP + EDGE
+      // 대상 왼쪽, 세로는 대상 중앙에 맞추되 화면 안으로 클램프
+      ? { left: hole.left - GAP - TIP_W, width: TIP_W,
+          top: Math.min(
+            Math.max(EDGE, hole.top + hole.height / 2 - TIP_H / 2),
+            window.innerHeight - TIP_H - EDGE) }
+      // 사방에 자리가 없으면(모바일에서 큰 대상) 하단 고정 — 대상을 일부
+      // 가리지만 안 보이는 것보다 낫다
+      : { ...centered, bottom: EDGE };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 100 }}>

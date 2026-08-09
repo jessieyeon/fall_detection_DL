@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-VIDEO_BYTES = b"pretend-this-is-bedroom-mp4-content"
+VIDEO_BYTES = b"pretend-this-is-unit-mp4-content"
 
 
 def _fake_analyze(video_path):
@@ -48,11 +48,11 @@ def built(tmp_path, sample_dir, monkeypatch):
     monkeypatch.setattr(analyze_mod, "analyze_video", _fake_analyze)
     monkeypatch.setattr(transcode, "ensure_readable", lambda p: (p, False))
 
-    video = os.path.join(tmp_path, "bedroom.mp4")
+    video = os.path.join(tmp_path, "unit.mp4")
     with open(video, "wb") as f:
         f.write(VIDEO_BYTES)
 
-    entry = bs.analyze_one("안방", video)
+    entry = bs.analyze_one("세대 내부", video)
     cache.save_manifest({cache.file_sha256(video): entry})
     return video
 
@@ -63,7 +63,7 @@ def test_build_writes_manifest_that_lookup_can_read(built, sample_dir):
 
     hit = cache.lookup(built)
     assert hit is not None, "build_samples 가 쓴 매니페스트를 lookup 이 못 읽었다"
-    assert hit["location"] == "안방"
+    assert hit["location"] == "세대 내부"
     assert hit["findings"]["summary"]
     # 매니페스트에는 상대 경로로 저장하고, 조회 시 절대 경로로 펴준다
     assert os.path.isabs(hit["image"]) and os.path.isfile(hit["image"])
@@ -87,7 +87,7 @@ def test_rebuilt_video_misses_cache(built, tmp_path):
     """영상을 다시 만들면 해시가 바뀌므로 캐시가 안 걸려야 한다(재실행 필요 신호)."""
     from webservice.consulting import cache
 
-    other = os.path.join(tmp_path, "bedroom_v2.mp4")
+    other = os.path.join(tmp_path, "unit_v2.mp4")
     with open(other, "wb") as f:
         f.write(VIDEO_BYTES + b"!")
     assert cache.lookup(other) is None
@@ -100,7 +100,7 @@ def app(tmp_path, monkeypatch):
     from webservice import auth, db, app as app_module
     db.init_db(dbfile)
     conn = db.connect(dbfile)
-    auth.create_user(conn, "s@d.com", "pw", "senior", "어르신")
+    auth.create_user(conn, "s@d.com", "pw", "admin", "관리자")
     conn.close()
     return app_module.app
 
@@ -120,14 +120,14 @@ def test_upload_of_sample_returns_precomputed_report(app, built, monkeypatch):
     c.post("/api/auth/login", json={"email": "s@d.com", "password": "pw"})
     r = c.post("/api/consulting/analyze",
                files={"file": ("아무이름.mp4", VIDEO_BYTES, "video/mp4")},
-               data={"location": "안방"})
+               data={"location": "세대 내부"})
     assert r.status_code == 200
 
     st = c.get(f"/api/consulting/status/{r.json()['job_id']}").json()
     assert st["status"] == "done", "캐시 적중인데 폴링을 돌게 만들었다"
 
     report = c.get(f"/api/consulting/report/{st['report_id']}").json()
-    assert report["location"] == "안방"
+    assert report["location"] == "세대 내부"
     assert report["summary"]
     # 리포트 이미지가 실제로 서빙돼야 화면이 깨지지 않는다
     img = c.get(f"/api/consulting/report/{st['report_id']}/image")
@@ -148,7 +148,7 @@ def test_upload_does_not_keep_a_second_copy_of_the_sample(app, built, tmp_path,
     c = TestClient(app)
     c.post("/api/auth/login", json={"email": "s@d.com", "password": "pw"})
     c.post("/api/consulting/analyze",
-           files={"file": ("bedroom.mp4", VIDEO_BYTES, "video/mp4")})
+           files={"file": ("unit.mp4", VIDEO_BYTES, "video/mp4")})
     assert os.listdir(updir) == []
 
 

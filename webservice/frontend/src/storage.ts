@@ -11,6 +11,10 @@
  * 실패하면 메모리에만 기억한다 — 같은 세션 안에서는 정상 동작한다.
  */
 
+// 앱 안내를 봤는지 표시하는 키. App(표시 판단)과 Login(체험 진입 시 초기화)이
+// 함께 쓰므로 여기 둔다 — Login 이 App 을 임포트하면 순환이 생긴다.
+export const TOUR_SEEN = "daon.tour.seen";
+
 const memory = new Map<string, string>();
 
 export function getFlag(key: string): string | null {

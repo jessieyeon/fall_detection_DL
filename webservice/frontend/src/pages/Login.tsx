@@ -1,13 +1,18 @@
 import { useState, type FormEvent, type ChangeEvent, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { login, type User } from "../api";
+import { setFlag, TOUR_SEEN } from "../storage";
 import { color, font, radius, shadow } from "../theme";
 import { Shield } from "../ui/icons";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 
-// 게스트 체험이 붙는 데모 계정. 보호자 시점을 보여주는 것이 컨셉이라 guardian.
-const GUEST = { email: "guardian@daon.com", password: "pw" };
+// 게스트 체험이 붙는 데모 계정. 관람객은 이메일을 입력하지 않고, 이 계정으로
+// 조용히 로그인해 관리자 시점 전체를 둘러본다.
+// ⚠️ webservice/seed.py 의 ADMIN_EMAIL/ADMIN_PW 와 반드시 같아야 한다.
+//    예전에 어르신·보호자 두 계정을 쓰다가 관리자 단일 계정으로 바꾸면서
+//    이 값이 뒤처져 체험 버튼이 통째로 죽은 적이 있다.
+const GUEST = { email: "admin@daon.com", password: "pw" };
 
 const inputStyle: CSSProperties = {
   padding: "10px 12px",
@@ -44,7 +49,11 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
 
   // 온라인 전시 관람객이 로그인 화면에서 막히면 체험 자체가 무산된다.
   // 게스트 버튼을 첫 화면의 주 동선으로 두고, 컨설팅으로 바로 보낸다.
-  const guest = () => go(GUEST.email, GUEST.password, "/consulting");
+  //
+  // '봤음' 플래그는 여기서 지운다. 같은 브라우저로 두 번째 관람객이 들어오면
+  // 플래그가 남아 있어 안내가 건너뛰어진다 — 체험 진입은 항상 새 관람객으로
+  // 취급해 첫 안내를 반드시 보여준다. (건너뛰기는 안내 안에서 여전히 가능)
+  const guest = () => { setFlag(TOUR_SEEN, ""); go(GUEST.email, GUEST.password, "/consulting"); };
 
   return (
     <div style={{

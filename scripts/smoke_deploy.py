@@ -116,7 +116,7 @@ def _sample_bytes(base, client, path):
 def check_samples(base, client):
     section("체험 콘텐츠")
     found = {}
-    for name in ("bedroom", "living", "kitchen"):
+    for name in ("unit", "lounge", "corridor"):
         data = _sample_bytes(base, client, f"/samples/{name}.mp4")
         if data:
             found[name] = data
@@ -131,7 +131,7 @@ def check_samples(base, client):
     return found
 
 
-def _analyze(base, client, blob, filename, location="거실", timeout=120):
+def _analyze(base, client, blob, filename, location="공용 라운지", timeout=120):
     """업로드 → 폴링 → (걸린 초, 상태, 리포트 id). 프런트와 같은 흐름."""
     t0 = time.perf_counter()
     r = client.post(f"{base}/api/consulting/analyze",

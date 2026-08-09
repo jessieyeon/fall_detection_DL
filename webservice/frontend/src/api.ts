@@ -1,8 +1,24 @@
-export type Role = "senior" | "guardian";
-export interface User { id: number; email: string; role: Role; name: string; apartment_name?: string }
-export interface SurveyLatest { score: number; risk_level: string; created_at: string }
-export interface Question { id: string; text: string; options: { label: string; points: number }[] }
-export interface Questionnaire { questions: Question[]; thresholds: Record<string, number> }
+export type Role = "admin";
+export interface User { id: number; email: string; role: Role; name: string; facility_name?: string }
+export interface Facility { name: string; facility_name: string; address: string }
+export interface Resident {
+  id: number; name: string; age: number | null;
+  room: string; phone: string; note: string;
+}
+export interface Camera {
+  id: number; name: string; location: string; device_key: string;
+  paired_at: string; last_seen_at: string | null; online: boolean;
+  resident_id: number | null; resident_name: string | null; resident_room: string | null;
+}
+/** 아직 등록되지 않은, 신호가 잡힌 기기. real=false 는 시연용 표본. */
+export interface FoundDevice { device_key: string; label: string; real: boolean }
+export interface Dispatch {
+  id: number; camera_name: string; location: string;
+  facility_name: string; address: string;
+  resident_id: number | null; resident_name: string | null;
+  age: number | null; room: string | null; phone: string | null;
+  dispatch_address: string; identified: boolean;
+}
 export interface Finding { zone: string; cell: [number, number]; score: number; level: string; recommendation: string }
 export interface Report {
   id: number; summary: string; findings: Finding[]; location: string; created_at: string;
@@ -11,8 +27,6 @@ export interface Report {
 }
 export interface ReportRow { id: number; user_id: number; created_at: string; location: string; summary: string }
 export interface Hospital { name: string; address: string; phone: string; distance_m: number; url: string }
-export interface Ward { id: number; name: string; risk_level: string | null }
-export interface Person { id: number; name: string }
 
 async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
@@ -33,24 +47,40 @@ export const login = (email: string, password: string) =>
 export const logout = () => req<{ status: string }>("/api/auth/logout", { method: "POST" });
 export const me = () => req<User>("/api/auth/me");
 
-// 설문
-export const surveyQuestions = () => req<Questionnaire>("/api/survey/questions");
-export const submitSurvey = (answers: Record<string, number>) =>
-  req<{ score: number; risk_level: string }>("/api/survey", { method: "POST", body: JSON.stringify({ answers }) });
-export const latestSurvey = () => req<SurveyLatest | null>("/api/survey/latest");
+// 관리자 — 설치 공간 목록은 서버가 알려준다(프런트에 하드코딩하지 않는다)
+export const adminMeta = () => req<{ locations: string[] }>("/api/admin/meta");
 
-// 보호자 매칭
-export const makeCode = () => req<{ code: string }>("/api/guardian/code", { method: "POST" });
-export const redeemCode = (code: string) =>
-  req<{ senior: Person }>("/api/guardian/redeem", { method: "POST", body: JSON.stringify({ code }) });
-export const wards = () => req<Ward[]>("/api/guardian/wards");
-export const guardianList = () => req<Person[]>("/api/guardian/list");
+// 관리자 — 시설
+export const getFacility = () => req<Facility>("/api/admin/facility");
+export const setFacility = (body: { facility_name?: string; address?: string }) =>
+  req<{ updated: boolean }>("/api/admin/facility", { method: "PATCH", body: JSON.stringify(body) });
 
-// 홈
+// 관리자 — 입주민
+export const listResidents = () => req<Resident[]>("/api/admin/residents");
+export const createResident = (body: Partial<Resident> & { name: string }) =>
+  req<{ id: number }>("/api/admin/residents", { method: "POST", body: JSON.stringify(body) });
+export const updateResident = (id: number, body: Partial<Resident>) =>
+  req<{ updated: boolean }>(`/api/admin/residents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+export const deleteResident = (id: number) =>
+  req<{ deleted: boolean }>(`/api/admin/residents/${id}`, { method: "DELETE" });
+
+// 관리자 — 카메라
+export const listCameras = () => req<Camera[]>("/api/admin/cameras");
+export const scanCameras = () => req<FoundDevice[]>("/api/admin/cameras/scan");
+export const registerCamera = (body: {
+  device_key: string; name: string; location: string; resident_id?: number | null;
+}) => req<{ id: number }>("/api/admin/cameras", { method: "POST", body: JSON.stringify(body) });
+export const updateCamera = (id: number, body: {
+  name?: string; location?: string; resident_id?: number | null; clear_resident?: boolean;
+}) => req<{ updated: boolean }>(`/api/admin/cameras/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+export const deleteCamera = (id: number) =>
+  req<{ deleted: boolean }>(`/api/admin/cameras/${id}`, { method: "DELETE" });
+export const dispatchInfo = (cameraId: number) =>
+  req<Dispatch>(`/api/admin/cameras/${cameraId}/dispatch`);
+
+// 근처 병원 — 신고 지원 화면에서 함께 보여준다
 export const hospitals = (coords?: { lat: number; lng: number }) =>
   req<Hospital[]>(`/api/home/hospitals${coords ? `?lat=${coords.lat}&lng=${coords.lng}` : ""}`);
-export const floorplanUrl = (apartment: string) =>
-  `/api/home/floorplan?apartment=${encodeURIComponent(apartment)}`;
 
 // 컨설팅
 export const analyzeVideo = (file: File, location = "") => {

@@ -11,8 +11,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from webservice import db, metrics
 from webservice.routes_auth import router as auth_router
-from webservice.routes_survey import router as survey_router
-from webservice.routes_guardian import router as guardian_router
+from webservice.routes_admin import router as admin_router
 from webservice.routes_home import router as home_router
 from webservice.routes_consulting import router as consulting_router
 from webservice.routes_live import router as live_router
@@ -77,9 +76,10 @@ async def _allow_framing(request, call_next):
     response.headers["Content-Security-Policy"] = (
         "frame-ancestors " + os.environ.get("DAON_FRAME_ANCESTORS", "*"))
     return response
+
+
 app.include_router(auth_router)
-app.include_router(survey_router)
-app.include_router(guardian_router)
+app.include_router(admin_router)
 app.include_router(home_router)
 app.include_router(consulting_router)
 app.include_router(live_router)
@@ -145,7 +145,10 @@ if os.path.isdir(_DIST):
     app.mount("/assets", StaticFiles(directory=os.path.join(_DIST, "assets")),
               name="assets")
 
-    @app.get("/{full_path:path}")
+    # GET 뿐 아니라 HEAD 도 받는다. 프런트가 샘플 영상 존재 여부를 HEAD 로
+    # 확인하는데, GET 만 열어두면 405 가 돌아와 '영상을 준비 중입니다'로
+    # 잘못 표시된다(파일은 멀쩡히 있는데 카드가 죽는다).
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     def spa(full_path: str):
         # /api·/ws 를 제외한 모든 경로는 index.html 로 돌려 클라이언트 라우팅을
         # 유지한다(/login, /mypage, /live 새로고침에도 안 깨지게).

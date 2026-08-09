@@ -23,6 +23,9 @@ DEFAULT_MIN_STEP_FRAC = 0.02   # 이만큼 못 움직이면 '제자리'로 보�
 DEFAULT_RADIUS_FRAC = 0.035    # 발끝 한 점이 차지하는 바닥 면적의 반지름
 DEFAULT_SMOOTH_WINDOW = 5      # 궤적 이동평균 창(프레임)
 DEFAULT_MAX_GAP = 3            # 이 프레임 수 이하의 미검출은 보간해서 잇는다
+DEFAULT_MAX_JUMP_FRAC = 0.10   # 한 샘플 사이 이동 상한(대각선 비율). 사람 걸음은
+                               # 3fps 샘플링에서 대각선의 ~6% 라 10% 면 여유가 있고,
+                               # 유리 반사·옆 사람으로 튀는 점프는 대부분 이보다 크다
 
 # 회전 지점 가중치. 근거와 '왜 7.9 를 그대로 쓰지 않는가'는 turn_weights() 참고.
 TURN_ANGLE_THRESHOLD_DEG = float(os.environ.get("DAON_TURN_ANGLE_DEG", "45"))
@@ -49,19 +52,59 @@ def foot_point(box):
     return ((x1 + x2) / 2.0, float(y2))
 
 
-def foot_points(boxes_per_frame):
+def foot_points(boxes_per_frame, max_jump=None, reset_after=DEFAULT_MAX_GAP):
     """프레임별 박스 목록 → 프레임별 발끝 좌표(검출 없으면 None).
 
-    한 프레임에 여러 명이 잡히면 가장 큰 박스를 고른다. 가정 내 촬영에서는
-    피사체가 카메라에 가장 크게 잡히고, 배경에 스치는 오검출은 작다.
+    **한 사람을 연속으로 따라간다.** 예전에는 프레임마다 독립적으로 '가장 큰
+    박스'를 골랐는데, 여러 명이 걷거나 유리창 반사가 함께 검출되면 '가장 큰
+    것'이 프레임마다 다른 대상으로 튄다. 그 점들을 한 궤적으로 이으니 실제로는
+    직진하는 사람의 동선이 지그재그로 그려졌다(복도 샘플에서 실제로 났던 사고).
+
+    규칙:
+      · 추적 시작(직전 위치 없음)은 가장 큰 박스 — 주 피사체일 확률이 높다
+      · 추적 중에는 직전 위치에서 **가장 가까운** 후보를 고른다
+      · 가장 가까운 후보조차 max_jump 보다 멀면 오검출로 보고 그 프레임을
+        미검출(None) 처리한다 — 반사상만 잡힌 프레임이 여기 걸린다
+      · 미검출이 이어지면 허용 점프를 그만큼 늘린다(사람은 계속 걷고 있으므로)
+      · reset_after 프레임 넘게 놓치면 추적을 포기하고 다시 큰 박스부터
+
+    max_jump 가 None 이면 예전 동작(프레임마다 가장 큰 박스) 그대로다.
     """
     out = []
+    last = None
+    misses = 0
+
+    def biggest_of(boxes):
+        return foot_point(max(
+            boxes, key=lambda b: abs(b[2] - b[0]) * abs(b[3] - b[1])))
+
     for boxes in boxes_per_frame:
         if not boxes:
             out.append(None)
+            misses += 1
+            if misses > reset_after:
+                last = None
             continue
-        biggest = max(boxes, key=lambda b: abs(b[2] - b[0]) * abs(b[3] - b[1]))
-        out.append(foot_point(biggest))
+
+        if last is None or max_jump is None:
+            chosen = biggest_of(boxes)
+        else:
+            candidates = [foot_point(b) for b in boxes]
+            chosen = min(candidates,
+                         key=lambda p: (p[0] - last[0]) ** 2 + (p[1] - last[1]) ** 2)
+            dist = ((chosen[0] - last[0]) ** 2 + (chosen[1] - last[1]) ** 2) ** 0.5
+            # 놓친 프레임 수만큼 허용 거리를 늘린다 — k 프레임을 놓쳤으면 사람은
+            # 그 사이 k+1 샘플만큼 걸어갔을 수 있다.
+            if dist > max_jump * (misses + 1):
+                out.append(None)
+                misses += 1
+                if misses > reset_after:
+                    last = None
+                continue
+
+        out.append(chosen)
+        last = chosen
+        misses = 0
     return out
 
 
@@ -143,7 +186,8 @@ def resample_segment(seg, min_step):
 def extract_path(boxes_per_frame, height, width,
                  smooth_window=DEFAULT_SMOOTH_WINDOW,
                  min_step_frac=DEFAULT_MIN_STEP_FRAC,
-                 max_gap=DEFAULT_MAX_GAP):
+                 max_gap=DEFAULT_MAX_GAP,
+                 max_jump_frac=DEFAULT_MAX_JUMP_FRAC):
     """프레임별 박스 → 스무딩·재샘플링을 마친 동선 구간 목록.
 
     반환값은 구간들의 리스트이고, 각 구간은 (x, y) 좌표 리스트다. 긴 미검출
@@ -151,8 +195,10 @@ def extract_path(boxes_per_frame, height, width,
     """
     diag = (height ** 2 + width ** 2) ** 0.5
     min_step = diag * min_step_frac
+    pts = foot_points(boxes_per_frame,
+                      max_jump=diag * max_jump_frac, reset_after=max_gap)
     segments = []
-    for seg in split_segments(foot_points(boxes_per_frame), max_gap=max_gap):
+    for seg in split_segments(pts, max_gap=max_gap):
         smoothed = smooth_segment(seg, smooth_window)
         resampled = resample_segment(smoothed, min_step)
         if resampled:

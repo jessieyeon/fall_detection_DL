@@ -49,6 +49,79 @@ def test_foot_points_picks_largest_box():
     assert pts == [(150.0, 260.0)]
 
 
+# --------------------------------------------------------------------------
+# 연속 추적 — 복도 샘플 회귀 (유리 반사·복수 인물)
+# --------------------------------------------------------------------------
+
+def _zigzag_amount(pts):
+    """x 진행 방향이 몇 번 뒤집히는지. 직진이면 0."""
+    flips = 0
+    xs = [p[0] for p in pts if p is not None]
+    for i in range(2, len(xs)):
+        if (xs[i] - xs[i - 1]) * (xs[i - 1] - xs[i - 2]) < 0:
+            flips += 1
+    return flips
+
+
+def test_tracking_ignores_window_reflection():
+    """유리창 반사가 더 크게 잡혀도 걷던 사람을 계속 따라가야 한다.
+
+    복도 샘플 회귀: 프레임마다 '가장 큰 박스'를 고르면 반사상이 더 크게 잡힌
+    프레임에서 궤적이 창가로 튀었다가 돌아와 지그재그가 그려진다.
+    """
+    frames = []
+    for i, x in enumerate(np.linspace(60, W - 60, 40)):
+        boxes = [_box_at(float(x), 250)]
+        if i % 3 == 1:                       # 셋에 한 번 반사상이 더 크게 잡힌다
+            boxes.append(_box_at(30.0, 120, w=60, h=120))
+        frames.append(boxes)
+
+    pts = heatmap.foot_points(frames, max_jump=30.0)
+    assert all(p is not None and p[1] == 250 for p in pts), \
+        "반사상(창가, y=120)으로 궤적이 튀었다"
+    assert _zigzag_amount(pts) == 0
+
+
+def test_tracking_stays_on_one_of_several_walkers():
+    """세 명이 나란히 걸으면 그중 한 명만 따라가야 한다 — 이 사람 저 사람의
+    발끝을 섞어 이으면 없는 지그재그가 생긴다."""
+    rng = np.random.default_rng(1)
+    frames = []
+    for x in np.linspace(60, W - 60, 40):
+        # 세 명이 30px 간격으로 나란히. 박스 크기는 프레임마다 조금씩 달라
+        # '가장 큰 박스' 선택이 사람 사이를 오가게 만든다.
+        frames.append([
+            _box_at(float(x) + off, 250, w=30 + int(rng.integers(0, 8)))
+            for off in (-30, 0, 30)
+        ])
+
+    pts = heatmap.foot_points(frames, max_jump=30.0)
+    assert _zigzag_amount(pts) <= 2      # 추적 대상이 고정되면 거의 단조 증가
+
+    # 대조군: 예전 방식(가장 큰 박스)은 사람 사이를 오간다
+    old = heatmap.foot_points(frames)
+    assert _zigzag_amount(old) > _zigzag_amount(pts)
+
+
+def test_tracking_allows_larger_jump_after_misses():
+    """미검출 뒤 첫 재검출은 그 사이 걸어간 거리만큼 멀어도 이어져야 한다."""
+    step = 20.0
+    xs = [0, 1, 2, None, None, 5]        # 2프레임 놓친 뒤 3걸음 앞에서 재검출
+    frames = [[_box_at(60 + x * step, 250)] if x is not None else []
+              for x in xs]
+
+    pts = heatmap.foot_points(frames, max_jump=step * 1.2)
+    assert pts[-1] is not None, "놓친 사이 걸어간 만큼의 점프가 거부됐다"
+
+
+def test_tracking_recovers_after_losing_the_person():
+    """오래 놓치면 추적을 포기하고 새 대상(가장 큰 박스)부터 다시 시작한다."""
+    frames = [[_box_at(60.0, 250)]] + [[] for _ in range(5)] + \
+             [[_box_at(280.0, 100, w=40, h=80)]]
+    pts = heatmap.foot_points(frames, max_jump=10.0, reset_after=3)
+    assert pts[-1] == heatmap.foot_point(_box_at(280.0, 100, w=40, h=80))
+
+
 def test_missing_detection_splits_segments():
     pts = [(1, 1), (2, 2), None, (9, 9), (10, 10)]
     segs = heatmap.split_segments(pts)

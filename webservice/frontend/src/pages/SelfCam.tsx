@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { color, font, radius } from "../theme";
-import { Alert, Video, Wifi } from "../ui/icons";
+import { Alert, Person, Video } from "../ui/icons";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
+import { useIsMobile } from "../useMedia";
 
 /**
  * 내 카메라 체험 — 관람객 기기의 카메라로 낙상 감지를 직접 체험한다.
  *
  * 포즈 추출(MediaPipe Tasks)은 전부 이 브라우저 안에서 돈다. 서버로는 관절
- * 좌표 33개만 보내고 영상 픽셀은 절대 나가지 않는다 — '자세만 보고 영상은
- * 보내지 않는다'는 제품 약속이 코드 구조로 강제된다.
+ * 좌표 33개(프레임당 ~1KB)만 보낸다 — 영상 픽셀을 올리면 대역폭도 서버 부하도
+ * 감당이 안 되고, 판정에 필요한 정보는 좌표가 전부다.
  *
  * 판정(모델·persistence·타일 선택)은 서버가 부스 파이프라인과 동일한 코드로
  * 수행한다. 브라우저마다 모델을 다시 구현하면 부스와 온라인의 판정이 어긋난다.
@@ -21,6 +22,10 @@ const MODEL_URL =
   "pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
 const SEND_FPS = 20;                 // 서버 전송 상한. 판정 품질에 충분한 수준.
+/** 실시간 감지 화면(Live.tsx)의 캔버스와 같은 크기·비율로 맞춘다. */
+const CANVAS_W = 480;
+const CANVAS_H = 720;
+const FLOOR_TOP = 0.6;               // Live.tsx 와 동일
 const CONNECTIONS: [number, number][] = [
   [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
   [11, 23], [12, 24], [23, 24],
@@ -32,6 +37,7 @@ type Phase = "loading" | "running" | "busy" | "unavailable" | "error";
 type FallState = { tiles: number[]; rows: number; cols: number } | null;
 
 export default function SelfCam({ onExit }: { onExit: () => void }) {
+  const mobile = useIsMobile();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -117,16 +123,20 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
         const cv = canvasRef.current;
         if (!cv || video.readyState < 2) return;
 
-        const W = (cv.width = video.videoWidth);
-        const H = (cv.height = video.videoHeight);
+        // 실시간 감지 화면과 같은 세로 비율(480×720). 카메라 원본을 더 이상
+        // 그리지 않으므로 캔버스 크기를 영상 해상도에 맞출 이유가 없고,
+        // 두 화면이 다른 비율이면 같은 기능이 다른 제품처럼 보인다.
+        const W = (cv.width = CANVAS_W);
+        const H = (cv.height = CANVAS_H);
         const ctx = cv.getContext("2d")!;
 
-        // 거울 모드: 관람객은 거울처럼 보이는 화면을 기대한다.
-        ctx.save();
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, -W, 0, W, H);
-        ctx.restore();
-        ctx.fillStyle = "rgba(14,17,22,0.35)";
+        // 실시간 감지 화면과 같은 어두운 배경 위에 스켈레톤만 얹는다.
+        // 예전에는 카메라 원본을 반투명하게 깔았는데, 두 화면이 서로 다르게
+        // 보여서 같은 기능이 다른 제품처럼 읽혔다.
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, "#101623");
+        bg.addColorStop(1, "#1A2438");
+        ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
 
         const now = performance.now();
@@ -143,8 +153,10 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
           // 전송 스로틀 — 판정에는 20fps 면 충분하고 서버 부하는 절반이 된다.
           if (ws?.readyState === WebSocket.OPEN && now - lastSent >= 1000 / SEND_FPS) {
             lastSent = now;
+            // 판정에는 캔버스가 아니라 실제 영상 크기를 보낸다. 화면 비율을
+            // 바꿨다고 판정 기준이 흔들리면 안 된다.
             ws.send(JSON.stringify({
-              t: now / 1000, w: W, h: H, lm, wlm,
+              t: now / 1000, w: video.videoWidth, h: video.videoHeight, lm, wlm,
             }));
           }
         }
@@ -170,7 +182,7 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
         // 바닥 타일(하드웨어 대응 시각화): 발동 시 해당 칸 점등
         const f = fallRef.current;
         const rows = f?.rows ?? 2, cols = f?.cols ?? 2;
-        const floorY = H * 0.72, floorH = H - floorY;
+        const floorY = H * FLOOR_TOP, floorH = H - floorY;
         for (let r = 0; r < rows; r++)
           for (let c = 0; c < cols; c++) {
             const idx = r * cols + c;
@@ -231,13 +243,17 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
   }
 
   return (
-    <>
+    // 실시간 감지 화면과 같은 배치 — 영상을 왼쪽에 작게 두고 안내를 오른쪽에 세운다.
+    // 캔버스를 본문 폭에 꽉 채우면 화면을 넘겨서 스크롤해야만 설명이 보였다.
+    <div style={{
+      display: "grid", gap: 14, alignItems: "start",
+      gridTemplateColumns: mobile ? "1fr" : "minmax(0, 300px) 1fr",
+    }}>
       <Card pad={0} style={{ overflow: "hidden" }}>
         <div style={{ position: "relative", background: "#0E1116", lineHeight: 0 }}>
           <video ref={videoRef} playsInline muted style={{ display: "none" }} />
-          <canvas ref={canvasRef}
-                  style={{ display: "block", width: "100%", height: "auto",
-                           aspectRatio: "4 / 3" }} />
+          <canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H}
+                  style={{ display: "block", width: "100%", height: "auto" }} />
           {phase === "loading" && (
             <div style={{
               position: "absolute", inset: 0, display: "flex", flexDirection: "column",
@@ -255,8 +271,12 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
           {phase === "running" && (
             <>
               <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 6 }}>
+                {/* 부모가 lineHeight:0 이라(캔버스 아래 여백을 없애려고) 그대로 두면
+                    글자 높이가 0으로 접혀 배지 밖으로 삐져나온다. 여기서 되돌린다. */}
                 <span style={{
-                  padding: "3px 9px", fontSize: font.caption, fontWeight: 700,
+                  display: "inline-flex", alignItems: "center",
+                  padding: "5px 10px", lineHeight: 1.3,
+                  fontSize: font.caption, fontWeight: 700, whiteSpace: "nowrap",
                   borderRadius: radius.sm, background: color.red, color: color.white,
                 }}>
                   내 카메라
@@ -302,16 +322,22 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
         </div>
       </Card>
 
-      <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        <Wifi size={16} color={color.brand} />
-        <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
-          카메라 영상은 <b>이 기기 밖으로 나가지 않습니다.</b> AI가 인식한 자세
-          좌표만 서버로 보내 낙상을 판정합니다. 화면 앞에서 천천히 주저앉거나
-          몸을 기울여 보세요 — 진짜로 넘어질 필요는 없어요!
-        </span>
-      </Card>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* 실시간 감지 화면과 같은 문구. 같은 안내를 두 화면이 다르게 말하면
+            어느 쪽이 맞는지 관람객이 알 수 없다. */}
+        <Card bg={color.brandTint} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <Person size={16} color={color.brand} />
+          <span style={{ fontSize: font.small, color: color.ink, lineHeight: 1.6 }}>
+            <b>발끝부터 머리까지</b> 카메라 화면 안에 모두 들어와야 자세를
+            정확히 인식합니다. 몸의 일부가 잘리면 감지가 어려우니,
+            카메라 위치를 고정한 뒤 다시 시작해 주세요.
+          </span>
+        </Card>
 
-      <Button variant="ghost" onClick={onExit}>체험 끝내기</Button>
-    </>
+        <Button variant="ghost" onClick={onExit} style={{ alignSelf: "flex-start" }}>
+          체험 끝내기
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -15,13 +15,17 @@ from webservice import live
 
 
 class LiveBridge:
-    def __init__(self, url, token=None, client=None, timeout=1.0):
+    def __init__(self, url, token=None, client=None, timeout=1.0, device_key=None):
         base = url.rstrip("/")
         self._event_url = base + "/api/live/event"
         self._frame_url = base + "/api/live/frame"
         self._control_url = base + "/api/live/control"
         self._health_url = base + "/api/health"
         self._token = token or os.environ.get("LIVE_INGEST_TOKEN", "daon-live")
+        # 이 카메라가 자기를 밝히는 값. 관리자 화면의 '주변 카메라 찾기'가 이걸로
+        # 채워지고, 등록된 카메라는 온라인으로 바뀐다. 없으면 익명으로 중계한다 —
+        # device_key 없이 띄우던 기존 방식이 그대로 돌아야 한다.
+        self._device_key = device_key or os.environ.get("DAON_DEVICE_KEY", "")
         self._own_client = client is None
         if client is None:
             import httpx  # 지연 임포트 — 중계를 안 쓰면 httpx 를 강제하지 않는다
@@ -46,16 +50,22 @@ class LiveBridge:
         except Exception:
             ok = False
         if ok:
-            print(f"[중계] 플랫폼 연결됨 - 감지 결과를 {self._event_url} 로 중계합니다.")
+            who = f" (기기 {self._device_key})" if self._device_key else ""
+            print(f"[중계] 플랫폼 연결됨{who} - 감지 결과를 {self._event_url} 로 중계합니다.")
         else:
             print(f"[중계] 경고: 플랫폼에 연결할 수 없습니다 ({self._health_url}) - "
                   "중계 없이 진행합니다.")
         return ok
 
+    def _headers(self, **extra):
+        h = {"X-Live-Token": self._token, **extra}
+        if self._device_key:
+            h["X-Device-Key"] = self._device_key
+        return h
+
     def _post(self, message):
         try:
-            self._client.post(self._event_url, json=message,
-                              headers={"X-Live-Token": self._token})
+            self._client.post(self._event_url, json=message, headers=self._headers())
         except Exception:
             pass   # 중계 실패는 조용히 무시 - 감지 파이프라인이 우선
 
@@ -79,8 +89,7 @@ class LiveBridge:
             return self._paused
         self._last_control = now
         try:
-            r = self._client.get(self._control_url,
-                                 headers={"X-Live-Token": self._token})
+            r = self._client.get(self._control_url, headers=self._headers())
             if r.status_code == 200:
                 self._paused = bool(r.json().get("paused", False))
         except Exception:
@@ -114,8 +123,7 @@ class LiveBridge:
             if not ok:
                 return
             self._client.post(self._frame_url, content=buf.tobytes(),
-                              headers={"X-Live-Token": self._token,
-                                       "Content-Type": "image/jpeg"})
+                              headers=self._headers(**{"Content-Type": "image/jpeg"}))
         except Exception:
             pass   # 중계 실패는 조용히 무시 - 감지 파이프라인이 우선
 

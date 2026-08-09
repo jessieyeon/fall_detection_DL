@@ -2,8 +2,8 @@
 
 구조:
   브라우저(MediaPipe Tasks JS)가 카메라에서 랜드마크만 추출해 WebSocket 으로
-  보낸다. 영상 픽셀은 기기 밖으로 나가지 않는다 — '자세만 보고 영상은 보내지
-  않는다'는 제품 약속이 온라인 체험에서는 문자 그대로 성립한다.
+  보낸다. 좌표 33개는 프레임당 ~1KB 라 영상 자체를 올리는 것보다 훨씬 가볍고,
+  판정에 필요한 정보는 좌표가 전부다.
 
   서버는 main.py 파이프라인과 같은 특징 정의(pose_source._detect_pose /
   extract_features_v4.py)와 같은 스코어러(temporal_risk.TemporalRiskScorer)로

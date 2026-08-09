@@ -11,24 +11,14 @@ def client(tmp_path, monkeypatch):
     from webservice import db, auth, app as app_module
     db.init_db(dbfile)
     conn = db.connect(dbfile)
-    uid = auth.create_user(conn, "s@d.com", "pw", "senior", "어르신")
-    conn.execute("UPDATE users SET address=?, apartment_name=? WHERE id=?",
-                 ("서울시 어딘가", "다온아파트", uid))
+    uid = auth.create_user(conn, "a@d.com", "pw", "admin", "관리자")
+    conn.execute("UPDATE users SET address=?, facility_name=? WHERE id=?",
+                 ("서울시 어딘가", "다온실버타운", uid))
     conn.commit()
     conn.close()
     c = TestClient(app_module.app)
-    c.post("/api/auth/login", json={"email": "s@d.com", "password": "pw"})
+    c.post("/api/auth/login", json={"email": "a@d.com", "password": "pw"})
     return c
-
-
-def test_floorplan_match(client):
-    r = client.get("/api/home/floorplan", params={"apartment": "다온아파트"})
-    assert r.status_code == 200 and r.headers["content-type"].startswith("image")
-
-
-def test_floorplan_unknown_404(client):
-    assert client.get("/api/home/floorplan",
-                      params={"apartment": "없는아파트"}).status_code == 404
 
 
 def test_hospitals_uses_address(client, monkeypatch):

@@ -326,7 +326,7 @@ webservice/frontend 를 보호자용 대시보드 컨셉으로 리디자인해�
 
 **은서님 대기 항목**
 
-1. AI 할머니 영상 3개 → `webservice/frontend/public/samples/{bedroom,living,kitchen}.mp4`
+1. AI 할머니 영상 3개 → `webservice/frontend/public/samples/{unit,lounge,corridor}.mp4`
 2. 데모 영상 → `webservice/frontend/public/demo/fall-detection-demo.mp4`
 3. 삼성생명 CI 정확한 HEX → `src/theme.ts` 상단 `BRAND` 상수
 4. 영상 넣은 뒤 `python3 scripts/build_samples.py --auto` 실행 후 커밋

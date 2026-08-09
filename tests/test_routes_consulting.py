@@ -12,8 +12,8 @@ def env(tmp_path, monkeypatch):
     from webservice import db, auth, app as app_module
     db.init_db(dbfile)
     conn = db.connect(dbfile)
-    auth.create_user(conn, "s@d.com", "pw", "senior", "어르신")
-    auth.create_user(conn, "g@d.com", "pw", "guardian", "보호자")
+    auth.create_user(conn, "s@d.com", "pw", "admin", "관리자")
+    auth.create_user(conn, "g@d.com", "pw", "admin", "관리자2")
     conn.close()
 
     # YOLO 우회: 좌상단이 뜨거운 합성 히트맵을 반환
@@ -68,26 +68,16 @@ def test_analyze_creates_report(env):
     assert len(listing) == 1 and listing[0]["id"] == rid
 
 
-def test_guardian_can_read_linked_senior_report(env):
-    senior = _login(env, "s@d.com")
-    code = senior.post("/api/guardian/code").json()["code"]
-    rid = senior.post("/api/consulting/analyze",
-                      files={"file": ("c.mp4", b"x", "video/mp4")}).json()["job_id"]
-    rid = senior.get(f"/api/consulting/status/{rid}").json()["report_id"]
+def test_other_admin_cannot_read_report(env):
+    """리포트는 만든 사람만 본다. 다른 관리자 계정으로는 못 읽는다."""
+    owner = _login(env, "s@d.com")
+    rid = owner.post("/api/consulting/analyze",
+                     files={"file": ("c.mp4", b"x", "video/mp4")}).json()["job_id"]
+    rid = owner.get(f"/api/consulting/status/{rid}").json()["report_id"]
 
-    guardian = _login(env, "g@d.com")
-    guardian.post("/api/guardian/redeem", json={"code": code})
-    assert guardian.get(f"/api/consulting/report/{rid}").status_code == 200
-    assert len(guardian.get("/api/consulting/reports").json()) == 1
-
-
-def test_unlinked_guardian_denied(env):
-    senior = _login(env, "s@d.com")
-    rid = senior.post("/api/consulting/analyze",
-                      files={"file": ("c.mp4", b"x", "video/mp4")}).json()["job_id"]
-    rid = senior.get(f"/api/consulting/status/{rid}").json()["report_id"]
-    guardian = _login(env, "g@d.com")          # 연결 안 함
-    assert guardian.get(f"/api/consulting/report/{rid}").status_code == 403
+    other = _login(env, "g@d.com")
+    assert other.get(f"/api/consulting/report/{rid}").status_code == 403
+    assert other.get("/api/consulting/reports").json() == []
 
 
 def test_analyze_requires_login(env):
@@ -111,7 +101,7 @@ def test_cache_hit_skips_analysis(env, monkeypatch, tmp_path):
                         lambda p: called.append(p) or (_ for _ in ()).throw(
                             AssertionError("캐시가 있는데 분석을 돌렸다")))
     monkeypatch.setattr(rc, "_lookup_cache", lambda path: {
-        "location": "안방",
+        "location": "세대 내부",
         "findings": {"summary": "미리 계산된 요약", "findings": [], "grid": [],
                      "evidence": "근거"},
         "image": image,
@@ -119,8 +109,8 @@ def test_cache_hit_skips_analysis(env, monkeypatch, tmp_path):
 
     senior = _login(env, "s@d.com")
     r = senior.post("/api/consulting/analyze",
-                    files={"file": ("bedroom.mp4", b"sample-bytes", "video/mp4")},
-                    data={"location": "안방"})
+                    files={"file": ("unit.mp4", b"sample-bytes", "video/mp4")},
+                    data={"location": "세대 내부"})
     assert r.status_code == 200
 
     # 폴링 없이 바로 done — 프런트 흐름은 그대로 쓰면서 대기가 0이 된다

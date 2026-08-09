@@ -45,8 +45,9 @@ export default function Intro({ onClose }: { onClose: () => void }) {
             margin: "6px 0 0", fontSize: font.small, color: color.inkSoft, lineHeight: 1.65,
           }}>
             다온 안전지킴이는 어르신의 안전한 일상을 위해 <b>컨설팅</b>과{" "}
-            <b>실시간 감지</b>를 제공하는 <b>보호자용 앱</b>입니다.
-            멀리 떨어져 있어도 어르신 곁의 위험을 확인하고 대비할 수 있어요.
+            <b>실시간 감지</b>를 제공하는 <b>시설 관리자용 앱</b>입니다.
+            세대 내부부터 공용 라운지·복도까지, 어르신이 지나다니는 곳의 위험을
+            미리 확인하고 대비할 수 있어요.
           </p>
         </div>
         <button onClick={onClose} aria-label="소개 닫기" style={{
@@ -101,9 +102,10 @@ export default function Intro({ onClose }: { onClose: () => void }) {
           왜 동선인가요?
         </span>
         <span style={{ fontSize: font.caption, color: color.ink, lineHeight: 1.7 }}>
-          국내 가정 낙상은 화장실(21.0%)보다 <b>거실(26.7%)</b>에서 더 많이 일어납니다.
-          거실이 더 위험해서가 아니라, 가장 자주 지나다니는 공간이기 때문입니다.
-          다온은 실제 생활 동선을 재서 <b>어디를 먼저 손봐야 하는지</b> 알려드립니다.
+          고령자 안전사고의 <b>62.7%가 낙상</b>이고, 그 낙상의 <b>74.8%가 생활공간
+          안</b>에서 일어납니다. 특정 공간이 더 위험해서가 아니라, 매일 지나다니는
+          곳이기 때문입니다. 다온은 실제 생활 동선을 재서{" "}
+          <b>어디를 먼저 손봐야 하는지</b> 알려드립니다.
         </span>
       </div>
     </Card>

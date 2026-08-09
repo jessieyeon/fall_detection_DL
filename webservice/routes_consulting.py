@@ -113,14 +113,9 @@ def _unpack(result):
 
 
 def _can_access(conn, user, owner_id):
-    if user["id"] == owner_id:
-        return True
-    if user["role"] == "guardian":
-        row = conn.execute(
-            "SELECT 1 FROM guardian_links WHERE guardian_id=? AND senior_id=?",
-            (user["id"], owner_id)).fetchone()
-        return row is not None
-    return False
+    # 역할이 admin 하나뿐이라 리포트는 만든 사람만 본다. 예전에는 보호자가
+    # 연결된 어르신의 리포트를 볼 수 있었으나, 어르신 계정 자체가 없어졌다.
+    return user["id"] == owner_id
 
 
 @router.post("/analyze")
@@ -133,7 +128,7 @@ async def analyze(user=Depends(current_user), file: UploadFile = File(...),
     await _save_upload(file, video_path)
 
     user_id = user["id"]
-    video_ref = location or file.filename   # 촬영 위치(거실 등)를 저장, 없으면 파일명
+    video_ref = location or file.filename   # 촬영 위치(공용 라운지 등)를 저장, 없으면 파일명
 
     # 체험용 샘플이면 사전 계산된 결과를 바로 돌려준다. 분석은 건너뛰지만
     # DB 행은 똑같이 만들어서 리포트 조회·목록·이미지 서빙이 그대로 동작한다.
@@ -182,15 +177,9 @@ def status(job_id: str, user=Depends(current_user)):
 def reports(user=Depends(current_user)):
     conn = db.connect()
     try:
-        if user["role"] == "guardian":
-            rows = conn.execute(
-                "SELECT r.id, r.user_id, r.created_at, r.video_ref, r.findings_json "
-                "FROM reports r JOIN guardian_links gl ON gl.senior_id = r.user_id "
-                "WHERE gl.guardian_id = ? ORDER BY r.id DESC", (user["id"],)).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, user_id, created_at, video_ref, findings_json FROM reports "
-                "WHERE user_id = ? ORDER BY id DESC", (user["id"],)).fetchall()
+        rows = conn.execute(
+            "SELECT id, user_id, created_at, video_ref, findings_json FROM reports "
+            "WHERE user_id = ? ORDER BY id DESC", (user["id"],)).fetchall()
     finally:
         conn.close()
     out = []
