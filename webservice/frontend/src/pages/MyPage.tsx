@@ -35,6 +35,35 @@ function Field({ label, ...rest }: { label: string } & Record<string, unknown>) 
   );
 }
 
+// ── 연락처 ────────────────────────────────────────────────────────────
+
+/** 연락처 자릿수. 3-4-4 로 고정한다(010-1234-5678). */
+const PHONE_DIGITS = 11;
+
+/**
+ * 입력 중인 값을 010-1234-5678 모양으로 만든다.
+ *
+ * 사용자가 친 것에서 숫자만 뽑아 다시 조립한다. 하이픈을 '끼워 넣는' 방식이
+ * 아니라 매번 새로 만드는 방식인 이유: 붙여넣기(01012345678, 010 1234 5678,
+ * +82-10-… 을 지운 뒤 등)와 중간 지우기가 전부 같은 경로로 처리돼서, 어떤
+ * 순서로 편집해도 결과가 한 가지 모양으로 수렴한다.
+ *
+ * 11자리를 넘는 입력은 잘라낸다 — 실수로 한 번 더 누른 숫자가 조용히 들어가
+ * 119 에 잘못된 번호를 읽어주는 것보다, 아예 안 들어가는 편이 낫다.
+ */
+export function formatPhone(raw: string): string {
+  const d = (raw || "").replace(/\D/g, "").slice(0, PHONE_DIGITS);
+  if (d.length <= 3) return d;
+  if (d.length <= 7) return `${d.slice(0, 3)}-${d.slice(3)}`;
+  return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+}
+
+/** 저장해도 되는 값인지. 비어 있는 것은 허용한다(연락처는 선택 항목). */
+function phoneComplete(value: string): boolean {
+  const d = (value || "").replace(/\D/g, "");
+  return d.length === 0 || d.length === PHONE_DIGITS;
+}
+
 function ErrorText({ children }: { children?: string }) {
   if (!children) return null;
   return (
@@ -400,7 +429,9 @@ function ResidentSection({ residents, reload }:
     setForm({
       name: r.name,
       age: r.age == null ? "" : String(r.age),
-      room: r.room ?? "", phone: r.phone ?? "",
+      room: r.room ?? "",
+      // 형식이 생기기 전에 저장된 번호도 수정 화면에서는 3-4-4 로 보여준다
+      phone: formatPhone(r.phone ?? ""),
       note: r.note ?? "", address: r.address ?? "",
       address_detail: r.address_detail ?? "",
     });
@@ -409,6 +440,12 @@ function ResidentSection({ residents, reload }:
 
   const save = async () => {
     setError("");
+    // 반쯤 적힌 번호는 저장하지 않는다. 119 에 읽어줄 번호라, 비어 있는 것보다
+    // '있는데 틀린' 쪽이 훨씬 나쁘다.
+    if (!phoneComplete(form.phone)) {
+      setError("연락처는 010-1234-5678 형식으로 11자리를 입력해 주세요.");
+      return;
+    }
     const body = {
       name: form.name,
       age: form.age ? Number(form.age) : null,
@@ -522,9 +559,13 @@ function ResidentSection({ residents, reload }:
                      setForm({ ...form, room: e.target.value })} />
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <Field label="연락처" value={form.phone}
+            {/* 하이픈은 타이핑하는 대로 자동으로 들어간다. inputMode=numeric 은
+                모바일에서 숫자 자판이 바로 뜨게 한다 — 어르신 정보를 넣는 분이
+                현장에서 폰으로 입력하는 경우가 많다. */}
+            <Field label="연락처" value={form.phone} inputMode="numeric"
+                   placeholder="010-1234-5678" maxLength={13}
                    onChange={(e: { target: { value: string } }) =>
-                     setForm({ ...form, phone: e.target.value })} />
+                     setForm({ ...form, phone: formatPhone(e.target.value) })} />
             <Field label="비고" placeholder="예) 보행 보조기 사용" value={form.note}
                    onChange={(e: { target: { value: string } }) =>
                      setForm({ ...form, note: e.target.value })} />

@@ -97,6 +97,26 @@ registry = DiscoveryRegistry()
 _RESIDENT_FIELDS = ("name", "age", "room", "phone", "note", "address",
                     "address_detail")
 
+# 연락처 자릿수. 3-4-4 로 고정한다(010-1234-5678).
+PHONE_DIGITS = 11
+
+
+def normalize_phone(value):
+    """연락처를 010-1234-5678 모양으로 맞춘다.
+
+    프런트가 이미 같은 규칙으로 하이픈을 넣어주지만, 서버에서 한 번 더 한다.
+    저장 경로가 화면 하나뿐이라는 보장이 없고(직접 API 호출, 예전 데이터 이관),
+    형식이 섞이면 119 지원 화면에서 읽어주기 어려워진다.
+
+    숫자가 11자리가 아니면 손대지 않고 공백만 정리해서 그대로 둔다 — 대표번호
+    같은 예외를 서버가 임의로 뭉개면 사용자가 넣은 정보가 소리 없이 바뀐다.
+    """
+    text = (value or "").strip()
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) != PHONE_DIGITS:
+        return text
+    return f"{digits[:3]}-{digits[3:7]}-{digits[7:]}"
+
 
 def list_residents(conn, admin_id):
     rows = conn.execute(
@@ -115,7 +135,7 @@ def create_resident(conn, admin_id, name, age=None, room="", phone="", note="",
         "INSERT INTO residents "
         "(admin_id, name, age, room, phone, note, address, address_detail) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (admin_id, name, age, room.strip(), phone.strip(), note.strip(),
+        (admin_id, name, age, room.strip(), normalize_phone(phone), note.strip(),
          (address or "").strip(), (address_detail or "").strip()))
     conn.commit()
     return cur.lastrowid
@@ -130,6 +150,8 @@ def update_resident(conn, admin_id, resident_id, **fields):
                 value = str(value).strip()
                 if not value:
                     raise ValueError("이름은 비워둘 수 없습니다")
+            elif key == "phone":
+                value = normalize_phone(value)
             elif key != "age":
                 value = str(value).strip()
             sets.append(f"{key} = ?")
