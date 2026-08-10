@@ -199,9 +199,10 @@ def main():
                     direction_deg, R, lean_ratio, rows, cols,
                     profile.tau_R, profile.tau_R_strict, profile.tau_lean)
                 # 배터리 용량 한계: 한 번에 타일 1장(모터 2개)만 작동한다. 여러 장이
-                # 선택되면 가장 낮은 번호 하나만 남긴다(펌웨어도 같은 규칙이라 에코가 맞음).
+                # 선택되면 낙상 방향에 가장 가까운 한 장만 남긴다(펌웨어도 1장만
+                # 움직이므로 에코가 맞는다).
                 if len(fired) > 1:
-                    fired = {min(fired)}
+                    fired = tiles.narrow_to_one(fired, direction_deg, rows, cols)
 
                 ack = False if args.no_serial else controller.fire(fired)
                 print(f"[낙상 위험] score={frame.risk_score:.2f} "

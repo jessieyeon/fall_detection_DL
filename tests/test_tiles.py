@@ -209,3 +209,78 @@ def test_result_size_is_always_one_to_four(direction, R, lean_ratio):
     result = pick(direction, R=R, lean_ratio=lean_ratio)
     assert 1 <= len(result) <= 4
     assert result <= {0, 1, 2, 3}
+
+
+# --- 한 장으로 줄이기 (배터리 한계) ---
+
+def test_tile_direction_points_at_each_corner_of_a_2x2_grid():
+    # 행 우선 번호: 0=먼쪽·좌, 1=먼쪽·우, 2=가까운쪽·좌, 3=가까운쪽·우
+    assert tiles.tile_direction_deg(0, 2, 2) == pytest.approx(315.0)
+    assert tiles.tile_direction_deg(1, 2, 2) == pytest.approx(45.0)
+    assert tiles.tile_direction_deg(2, 2, 2) == pytest.approx(225.0)
+    assert tiles.tile_direction_deg(3, 2, 2) == pytest.approx(135.0)
+
+
+@pytest.mark.parametrize("direction, expected", [
+    (45.0, 1),      # 먼쪽·우
+    (135.0, 3),     # 가까운쪽·우
+    (225.0, 2),     # 가까운쪽·좌
+    (315.0, 0),     # 먼쪽·좌
+    (341.0, 0),     # 아래는 실제 시연 로그에서 나온 방향들
+    (224.8, 2),
+    (74.4, 1),
+    (277.9, 0),
+])
+def test_narrow_to_one_follows_the_fall_direction(direction, expected):
+    """후보가 4장 전부여도 방향에 맞는 타일이 나와야 한다.
+
+    회귀 테스트다. 예전에는 min(candidates) 로 줄여서 R < tau_R 로 게이트가
+    열릴 때마다(= 후보 4장) 방향과 무관하게 항상 0번만 펴졌다.
+    """
+    assert tiles.narrow_to_one({0, 1, 2, 3}, direction, 2, 2) == {expected}
+
+
+def test_narrow_to_one_is_not_biased_toward_low_indices():
+    """네 방향이 네 타일을 각각 골라야 한다 - 전부 0이면 예전 버그다.
+
+    대각(45/135/225/315)으로 시험하는 이유: 2x2 격자에는 정방향(0/90/180/270)에
+    놓인 타일이 없다. 예를 들어 0도(먼 쪽)는 0번과 1번 모서리에서 정확히 45도씩
+    떨어져 동점이 되므로, 정방향으로는 편향을 판별할 수 없다.
+    """
+    chosen = {next(iter(tiles.narrow_to_one({0, 1, 2, 3}, d, 2, 2)))
+              for d in (315.0, 45.0, 225.0, 135.0)}
+    assert chosen == {0, 1, 2, 3}
+
+
+def test_narrow_to_one_on_a_cardinal_direction_is_a_tie_between_two_corners():
+    # 2x2 에서 0도는 0번·1번과 45도씩 떨어진 진짜 동점이다. 어느 쪽이 나오든
+    # 틀린 답은 아니고, 다만 같은 입력에 같은 답이 나오기만 하면 된다.
+    assert tiles.narrow_to_one({0, 1, 2, 3}, 0.0, 2, 2) <= {0, 1}
+    assert tiles.narrow_to_one({0, 1, 2, 3}, 180.0, 2, 2) <= {2, 3}
+
+
+def test_narrow_to_one_only_picks_from_the_candidates():
+    # 방향은 3번을 가리키지만 후보에 없으면 후보 중에서 골라야 한다
+    assert tiles.narrow_to_one({0, 1}, 135.0, 2, 2) <= {0, 1}
+
+
+def test_narrow_to_one_breaks_ties_deterministically():
+    # 정확히 두 타일의 중간을 가리키는 방향 - 늘 같은 답이 나와야 재현이 된다
+    first = tiles.narrow_to_one({0, 1}, 0.0, 2, 2)
+    assert first == tiles.narrow_to_one({0, 1}, 0.0, 2, 2)
+    assert len(first) == 1
+
+
+def test_narrow_to_one_handles_empty_candidates():
+    assert tiles.narrow_to_one(set(), 90.0, 2, 2) == set()
+
+
+@pytest.mark.parametrize("direction", [d * 7.0 for d in range(52)])
+@pytest.mark.parametrize("R", [0.5, 0.86, 0.99])
+@pytest.mark.parametrize("lean_ratio", [0.05, 0.4])
+def test_narrowing_any_selection_always_yields_exactly_one_valid_tile(
+        direction, R, lean_ratio):
+    result = tiles.narrow_to_one(pick(direction, R=R, lean_ratio=lean_ratio),
+                                 direction, 2, 2)
+    assert len(result) == 1
+    assert result <= {0, 1, 2, 3}

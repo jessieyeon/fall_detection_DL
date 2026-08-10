@@ -147,3 +147,41 @@ def select_tiles(direction_deg, R, lean_ratio, rows, cols,
 
     # 규칙 2: 대각 -> 전체에서 반대편 모서리 한 장 제외
     return all_tiles - {_corner_tile(_OPPOSITE_SECTOR[sector], rows, cols)}
+
+
+def tile_direction_deg(index, rows, cols):
+    """격자 중심에서 그 타일을 바라보는 방향(도).
+
+    각도 규약은 이 모듈의 나머지와 같다: 0=먼쪽(위), 90=우, 180=가까움, 270=좌.
+    타일 중심을 [0,1] 격자 좌표로 놓고 중앙(0.5, 0.5)에서의 벡터를 각으로 바꾼다.
+    """
+    r, c = divmod(index, cols)
+    dx = (c + 0.5) / cols - 0.5
+    dy = (r + 0.5) / rows - 0.5
+    if abs(dx) < MOTION_EPS and abs(dy) < MOTION_EPS:
+        return 0.0                       # 홀수 격자의 정중앙 타일
+    deg = math.degrees(math.atan2(dx, -dy)) % 360.0
+    return 0.0 if deg >= 360.0 else deg
+
+
+def narrow_to_one(candidates, direction_deg, rows, cols):
+    """후보 타일 중 낙상 방향에 가장 가까운 한 장만 남긴다.
+
+    왜 필요한가: 배터리가 한 번에 모터 2개(타일 1 + 덮개 1)만 감당하므로 여러 장이
+    선택돼도 실제로는 한 장만 펼 수 있다. 예전에는 `min(candidates)` 로 줄였는데,
+    번호가 낮은 타일이 늘 이겨서 **방향과 무관하게 항상 0번만 펴졌다**. 특히
+    R < tau_R 로 게이트가 열려 후보가 4장 전부일 때 그랬다 — 방향은 멀쩡히
+    계산돼 있는데 그 정보를 버리고 있었던 것이다.
+
+    확신도(R)가 낮아도 방향의 평균값은 아무 정보가 없는 것보다는 낫다. 어차피
+    한 장을 골라야 한다면 번호순보다 방향순이 맞다.
+
+    동점이면 번호가 낮은 쪽. 같은 입력에 늘 같은 타일이 나와야 시연에서
+    재현이 된다.
+    """
+    if not candidates:
+        return set()
+    best = min(candidates,
+               key=lambda i: (_angle_offset(direction_deg,
+                                            tile_direction_deg(i, rows, cols)), i))
+    return {best}
