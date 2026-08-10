@@ -6,13 +6,21 @@ import { Shield, Clipboard, Video, Person } from "./icons";
 
 type Tab = "consult" | "monitor" | "mypage";
 
+/**
+ * 탭 순서는 앱 소개(Tour) 단계 순서와 같아야 한다.
+ *
+ * 안내는 마이페이지 → 실시간 → 컨설팅 순으로 진행되는데(ui/Tour.tsx 의 STEPS,
+ * '쓰는 순서'다) 탭이 그 반대로 놓여 있었다. 안내를 따라가는 동안 스포트라이트가
+ * 아래에서 위로 거꾸로 올라가서, 어디를 설명하는 중인지 눈으로 따라가기 어려웠다.
+ * 둘 중 하나를 고칠 거라면 순서의 근거가 있는 쪽(안내)을 두고 탭을 맞춘다.
+ */
 const NAV: {
   tab: Tab; to: string; label: string;
   Icon: (p: { size?: number; color?: string }) => JSX.Element;
 }[] = [
-  { tab: "consult", to: "/consulting", label: "컨설팅", Icon: Clipboard },
-  { tab: "monitor", to: "/live", label: "실시간", Icon: Video },
   { tab: "mypage", to: "/mypage", label: "마이페이지", Icon: Person },
+  { tab: "monitor", to: "/live", label: "실시간", Icon: Video },
+  { tab: "consult", to: "/consulting", label: "컨설팅", Icon: Clipboard },
 ];
 
 function Brand({ compact }: { compact?: boolean }) {

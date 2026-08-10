@@ -6,6 +6,8 @@ export interface Resident {
   room: string; phone: string; note: string;
   /** 개별 주소(선택). 비어 있으면 신고 지원이 시설 주소를 쓴다. */
   address: string;
+  /** 상세 주소(동·호수 등). 우편번호 검색이 주지 못하는 부분이라 직접 입력받는다. */
+  address_detail: string;
 }
 export interface Camera {
   id: number; name: string; location: string; device_key: string;
@@ -19,6 +21,7 @@ export interface Dispatch {
   facility_name: string; address: string;
   resident_id: number | null; resident_name: string | null;
   age: number | null; room: string | null; phone: string | null;
+  resident_address_detail?: string | null;
   dispatch_address: string; identified: boolean;
 }
 export interface Finding { zone: string; cell: [number, number]; score: number; level: string; recommendation: string }

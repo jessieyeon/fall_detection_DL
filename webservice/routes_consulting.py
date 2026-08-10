@@ -2,6 +2,7 @@
 
 import json
 import os
+import sqlite3
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -95,6 +96,14 @@ def _insert_report(user_id, video_ref, image_path, report):
              json.dumps(report, ensure_ascii=False)))
         conn.commit()
         return cur.lastrowid
+    except sqlite3.IntegrityError as exc:
+        # user_id 가 users 에 없을 때 나는 'FOREIGN KEY constraint failed'.
+        # 이 잡은 백그라운드 스레드라 예외 문구가 그대로 화면 콘솔에 찍힌다 —
+        # 원인을 알아볼 수 있는 문장으로 바꿔 둔다. (routes_auth.current_user 가
+        # 매 요청 세션을 검증하므로 정상 경로에서는 더 이상 발생하지 않는다.)
+        raise RuntimeError(
+            "로그인 정보가 만료되어 리포트를 저장하지 못했습니다. "
+            "다시 로그인한 뒤 시도해 주세요.") from exc
     finally:
         conn.close()
 

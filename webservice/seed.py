@@ -29,7 +29,10 @@ _CAMERAS = [
 ]
 
 
-def seed_demo(path=db.DB_PATH):
+def seed_demo(path=None):
+    # 기본인자에 db.DB_PATH 를 박아두면 임포트 시점에 값이 고정돼, 테스트가
+    # webservice.db.DB_PATH 를 monkeypatch 해도 실제 DB 에 시드가 들어간다.
+    # 호출 시점에 읽는다 — db.connect() 와 같은 이유다.
     db.init_db(path)
     conn = db.connect(path)
     try:

@@ -4,6 +4,7 @@ routes_guardian.py(보호자-어르신 페어링)를 대체한다. 역할이 adm
 역할 검사는 없고, 로그인 여부와 '내 데이터인지'만 본다.
 """
 
+import sqlite3
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,20 @@ from webservice import cameras, db
 from webservice.routes_auth import current_user
 
 router = APIRouter(prefix="/api/admin")
+
+
+def _integrity(exc):
+    """sqlite IntegrityError 를 사람이 읽을 수 있는 400 으로 바꾼다.
+
+    그대로 두면 FastAPI 가 500 을 내고 프런트에는 'Internal Server Error' 만
+    뜬다. 실제로 '어르신 추가가 안 돼요'라는 제보의 원인이 화면에서는 전혀
+    보이지 않았다.
+    """
+    if "FOREIGN KEY" in str(exc):
+        return HTTPException(
+            status_code=401,
+            detail="로그인 정보가 만료되었습니다. 다시 로그인한 뒤 시도해 주세요.")
+    return HTTPException(status_code=400, detail=f"저장하지 못했습니다: {exc}")
 
 # 프런트가 설치 공간 선택지를 하드코딩하지 않도록 서버가 알려준다.
 # 공간 이름이 또 바뀔 때 두 곳을 고치다 한 곳을 빠뜨리는 일을 막는다.
@@ -31,6 +46,7 @@ class ResidentBody(BaseModel):
     phone: str = ""
     note: str = ""
     address: str = ""          # 개별 주소(선택). 있으면 신고 지원이 이걸 쓴다
+    address_detail: str = ""   # 상세 주소(동·호수 등). 주소 검색으로는 안 나온다
 
 
 class ResidentPatch(BaseModel):
@@ -40,6 +56,7 @@ class ResidentPatch(BaseModel):
     phone: Optional[str] = None
     note: Optional[str] = None
     address: Optional[str] = None
+    address_detail: Optional[str] = None
 
 
 class CameraBody(BaseModel):
@@ -117,9 +134,11 @@ def post_resident(body: ResidentBody, user=Depends(current_user)):
     try:
         rid = cameras.create_resident(
             conn, user["id"], body.name, body.age, body.room, body.phone,
-            body.note, body.address)
+            body.note, body.address, body.address_detail)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except sqlite3.IntegrityError as exc:
+        raise _integrity(exc)
     finally:
         conn.close()
     return {"id": rid}
@@ -181,6 +200,8 @@ def post_camera(body: CameraBody, user=Depends(current_user)):
                                       body.name, body.location, body.resident_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except sqlite3.IntegrityError as exc:
+        raise _integrity(exc)
     finally:
         conn.close()
     return {"id": cid}

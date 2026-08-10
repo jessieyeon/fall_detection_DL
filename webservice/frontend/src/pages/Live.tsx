@@ -442,8 +442,11 @@ export default function Live() {
                   </div>
                 </div>
               ) : (
+                // loop 를 뺐다 — 데모 영상은 낙상 장면 한 번을 보여주는 것이
+                // 목적이라, 끝난 뒤 멈춰야 방금 본 장면을 이야기할 틈이 생긴다.
                 <video src={DEMO_VIDEO_SRC} poster={DEMO_POSTER_SRC}
-                       controls autoPlay muted loop playsInline
+                       controls autoPlay muted playsInline
+                       preload="metadata"
                        onError={() => setVideoBroken(true)}
                        style={mediaFill} />
               )}

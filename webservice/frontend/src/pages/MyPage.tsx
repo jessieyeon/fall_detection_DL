@@ -380,7 +380,10 @@ function CameraSection({ residents }: { residents: Resident[] }) {
 function ResidentSection({ residents, reload }:
                          { residents: Resident[]; reload: () => void }) {
   const mobile = useIsMobile();
-  const empty = { name: "", age: "", room: "", phone: "", note: "", address: "" };
+  const empty = {
+    name: "", age: "", room: "", phone: "", note: "",
+    address: "", address_detail: "",
+  };
   const [form, setForm] = useState(empty);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
@@ -399,6 +402,7 @@ function ResidentSection({ residents, reload }:
       age: r.age == null ? "" : String(r.age),
       room: r.room ?? "", phone: r.phone ?? "",
       note: r.note ?? "", address: r.address ?? "",
+      address_detail: r.address_detail ?? "",
     });
     setOpen(true);
   };
@@ -409,7 +413,7 @@ function ResidentSection({ residents, reload }:
       name: form.name,
       age: form.age ? Number(form.age) : null,
       room: form.room, phone: form.phone, note: form.note,
-      address: form.address,
+      address: form.address, address_detail: form.address_detail,
     };
     try {
       if (editing == null) await createResident(body);
@@ -478,7 +482,9 @@ function ResidentSection({ residents, reload }:
                 <div style={{ fontSize: font.caption, color: color.inkSoft }}>{r.note}</div>
               )}
               {r.address && (
-                <div style={{ fontSize: font.caption, color: color.inkFaint }}>{r.address}</div>
+                <div style={{ fontSize: font.caption, color: color.inkFaint }}>
+                  {[r.address, r.address_detail].filter(Boolean).join(" ")}
+                </div>
               )}
               <div style={{ display: "flex", gap: 4, marginTop: "auto" }}>
                 <Button variant="ghost" onClick={() => startEdit(r)}>수정</Button>
@@ -539,6 +545,17 @@ function ResidentSection({ residents, reload }:
                 주소 검색
               </Button>
             </div>
+            {/* 상세 주소는 따로 받는다. 우편번호 검색은 도로명까지만 주므로
+                동·호수·층은 여기서 채워야 119 에 읽어줄 주소가 완성된다.
+                주소를 아직 안 고른 상태에서 상세만 적어두면 신고 화면에
+                동떨어진 조각만 남으므로, 주소가 있을 때만 연다. */}
+            {form.address && (
+              <input value={form.address_detail}
+                     placeholder="상세 주소 (예: 101동 1203호)"
+                     onChange={(e) =>
+                       setForm({ ...form, address_detail: e.target.value })}
+                     style={inputStyle} />
+            )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <Button onClick={save}>{editing == null ? "추가" : "저장"}</Button>

@@ -1,11 +1,12 @@
 """다온 웹 서비스 FastAPI 진입점."""
 
+import mimetypes
 import os
 import threading
 import time
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -88,7 +89,29 @@ app.include_router(live_router)
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    _seed()
     _warm_yolo()
+
+
+def _seed():
+    """시연 계정을 보장한다. 멱등이라 재시작마다 돌아도 안전하다.
+
+    Dockerfile 의 CMD 에도 `python -m webservice.seed` 가 있지만, 배포 플랫폼에서
+    시작 명령을 직접 지정하면(Railway/Render 의 Start Command) 그 CMD 가 통째로
+    무시된다. 그러면 DB 는 비어 있는데 서명 키(DAON_SECRET)는 그대로라 예전
+    세션 쿠키가 계속 유효하고, 결과적으로 '로그인은 되어 있는데 저장이 전부
+    FOREIGN KEY 로 실패하는' 상태가 된다. 여기서 한 번 더 부르면 서버가 어떻게
+    기동되든 계정이 존재한다.
+
+    DAON_SKIP_SEED=1 로 끌 수 있다(빈 DB 로 시작하고 싶은 테스트용).
+    """
+    if os.environ.get("DAON_SKIP_SEED") == "1":
+        return
+    try:
+        from webservice.seed import seed_demo
+        seed_demo()
+    except Exception as exc:                  # noqa: BLE001 - 시드 실패로 서버를 죽이지 않는다
+        print(f"[seed] 건너뜀: {exc}")
 
 
 def _warm_yolo():
@@ -138,6 +161,77 @@ def get_metrics():
     return m
 
 
+def _parse_range(header, size):
+    """`Range: bytes=start-end` 를 (start, end) 로 판다. 못 다루면 None.
+
+    다중 구간(`bytes=0-99,200-299`)은 지원하지 않는다 — 브라우저의 영상
+    탐색은 항상 단일 구간이고, multipart/byteranges 응답을 만들 이유가 없다.
+    """
+    if not header or not header.strip().lower().startswith("bytes="):
+        return None
+    spec = header.split("=", 1)[1].strip()
+    if "," in spec:
+        return None
+    start_s, _, end_s = spec.partition("-")
+    try:
+        if not start_s:                       # 'bytes=-500' → 마지막 500바이트
+            length = int(end_s)
+            if length <= 0:
+                return None
+            return max(0, size - length), size - 1
+        start = int(start_s)
+        end = int(end_s) if end_s else size - 1
+    except ValueError:
+        return None
+    end = min(end, size - 1)
+    if start > end or start >= size:
+        return None
+    return start, end
+
+
+def ranged_file_response(request, path, chunk=64 * 1024):
+    """Range 요청을 처리하는 파일 응답.
+
+    **왜 직접 만드나.** starlette 0.37.2 의 FileResponse 는 Range 헤더를 아예
+    무시하고 항상 200 + 파일 전체를 돌려준다(Range 지원은 0.45 에서 들어왔고,
+    fastapi 0.111 이 그 이전 버전을 고정한다). 브라우저는 Accept-Ranges 가 없고
+    206 도 못 받으면 아직 안 받은 지점으로 건너뛰지 못한다 — 영상 재생바를
+    끌어도 되돌아오는, '가끔 스크롤이 안 되는' 증상의 정체다. 파일이 이미 캐시에
+    다 들어와 있으면 잘 되기 때문에 새로고침 후에는 멀쩡해 보였다.
+
+    응답 크기가 커도 메모리는 chunk 만큼만 쓴다(제너레이터로 흘려보낸다).
+    """
+    size = os.path.getsize(path)
+    media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    headers = {"accept-ranges": "bytes"}
+
+    rng = _parse_range(request.headers.get("range"), size)
+    if rng is None:
+        # 범위 요청이 아니거나 해석할 수 없는 범위 → 평소대로 전체를 준다.
+        # (해석 못 한 범위에 416 을 주면 헤더가 조금만 특이해도 영상이 통째로
+        #  안 나온다. 전체를 주면 최소한 재생은 된다.)
+        return FileResponse(path, media_type=media_type, headers=headers)
+
+    start, end = rng
+    length = end - start + 1
+
+    def stream():
+        with open(path, "rb") as f:
+            f.seek(start)
+            left = length
+            while left > 0:
+                block = f.read(min(chunk, left))
+                if not block:
+                    break
+                left -= len(block)
+                yield block
+
+    headers["content-range"] = f"bytes {start}-{end}/{size}"
+    headers["content-length"] = str(length)
+    return StreamingResponse(stream(), status_code=206, media_type=media_type,
+                             headers=headers)
+
+
 # 빌드된 React SPA 를 같은 서버에서 서빙한다(단일 서버 시연). dist 가 없으면
 # (빌드 전/테스트) 이 블록은 건너뛰므로 API 전용으로 동작한다.
 _DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
@@ -149,7 +243,7 @@ if os.path.isdir(_DIST):
     # 확인하는데, GET 만 열어두면 405 가 돌아와 '영상을 준비 중입니다'로
     # 잘못 표시된다(파일은 멀쩡히 있는데 카드가 죽는다).
     @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
-    def spa(full_path: str):
+    def spa(full_path: str, request: Request):
         # /api·/ws 를 제외한 모든 경로는 index.html 로 돌려 클라이언트 라우팅을
         # 유지한다(/login, /mypage, /live 새로고침에도 안 깨지게).
         if full_path.startswith("api/"):
@@ -163,7 +257,7 @@ if os.path.isdir(_DIST):
             candidate = os.path.realpath(os.path.join(_DIST, full_path))
             if candidate.startswith(os.path.realpath(_DIST) + os.sep) \
                     and os.path.isfile(candidate):
-                return FileResponse(candidate)
+                return ranged_file_response(request, candidate)
 
         # index.html 은 캐시 금지. 번들 파일명(assets/index-XXXX.js)은 빌드마다
         # 바뀌는 해시라 마음껏 캐시해도 되지만, 그 파일명을 담고 있는 index.html

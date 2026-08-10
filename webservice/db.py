@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS residents (
     note TEXT NOT NULL DEFAULT '',
     -- 개별 주소(선택). 비어 있으면 시설 주소를 쓴다 — 위 '주소 정책' 참고.
     address TEXT NOT NULL DEFAULT '',
+    -- 상세 주소(동·호수·층 등). 우편번호 검색은 도로명까지만 주므로 나머지는
+    -- 손으로 받아야 한다. address 에 이어 붙이지 않고 따로 두는 이유: 붙여서
+    -- 저장하면 나중에 수정 화면에서 어디까지가 검색 결과였는지 되돌릴 수 없다.
+    address_detail TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -111,6 +115,9 @@ def init_db(path=None):
         if "address" not in cols:                      # 2026-08-09 추가
             conn.execute("ALTER TABLE residents "
                          "ADD COLUMN address TEXT NOT NULL DEFAULT ''")
+        if "address_detail" not in cols:               # 2026-08-11 추가
+            conn.execute("ALTER TABLE residents "
+                         "ADD COLUMN address_detail TEXT NOT NULL DEFAULT ''")
         conn.commit()
     finally:
         conn.close()

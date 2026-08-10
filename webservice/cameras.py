@@ -94,26 +94,29 @@ registry = DiscoveryRegistry()
 
 # ── 입주민 ────────────────────────────────────────────────────────────
 
-_RESIDENT_FIELDS = ("name", "age", "room", "phone", "note", "address")
+_RESIDENT_FIELDS = ("name", "age", "room", "phone", "note", "address",
+                    "address_detail")
 
 
 def list_residents(conn, admin_id):
     rows = conn.execute(
-        "SELECT id, name, age, room, phone, note, address FROM residents "
-        "WHERE admin_id = ? ORDER BY room, name", (admin_id,)).fetchall()
+        "SELECT id, name, age, room, phone, note, address, address_detail "
+        "FROM residents WHERE admin_id = ? ORDER BY room, name",
+        (admin_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
 def create_resident(conn, admin_id, name, age=None, room="", phone="", note="",
-                    address=""):
+                    address="", address_detail=""):
     name = (name or "").strip()
     if not name:
         raise ValueError("이름은 비워둘 수 없습니다")
     cur = conn.execute(
-        "INSERT INTO residents (admin_id, name, age, room, phone, note, address) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO residents "
+        "(admin_id, name, age, room, phone, note, address, address_detail) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (admin_id, name, age, room.strip(), phone.strip(), note.strip(),
-         address.strip()))
+         (address or "").strip(), (address_detail or "").strip()))
     conn.commit()
     return cur.lastrowid
 
@@ -273,7 +276,8 @@ def dispatch_info(conn, camera_id):
         "SELECT c.id, c.name AS camera_name, c.location, "
         "       u.facility_name, u.address, "
         "       r.id AS resident_id, r.name AS resident_name, r.age, r.room, "
-        "       r.phone, r.address AS resident_address "
+        "       r.phone, r.address AS resident_address, "
+        "       r.address_detail AS resident_address_detail "
         "FROM cameras c JOIN users u ON u.id = c.admin_id "
         "LEFT JOIN residents r ON r.id = c.resident_id "
         "WHERE c.id = ?", (camera_id,)).fetchone()
@@ -284,7 +288,11 @@ def dispatch_info(conn, camera_id):
         # 개별 주소가 있는 어르신(시설 밖 거주)은 그 주소가 곧 출동지다.
         # 시설 주소를 섞으면 구급대가 엉뚱한 곳으로 간다.
         parts = [d["resident_address"]]
-        if d["room"]:
+        # 상세 주소(동·호수)는 도로명 바로 뒤에 붙어야 읽어주기 좋다.
+        if d.get("resident_address_detail"):
+            parts.append(d["resident_address_detail"])
+        elif d["room"]:
+            # 상세 주소를 안 넣었으면 호실이라도 붙인다(예전 데이터 호환).
             parts.append(d["room"])
     else:
         parts = [p for p in (d["address"], d["facility_name"]) if p]

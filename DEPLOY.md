@@ -136,6 +136,7 @@ iOS Safari는 서드파티 쿠키에 특히 엄격합니다.
 | `DAON_TURN_WEIGHT` | `2.5` | 회전 지점 가중치 |
 | `DAON_TRANSCODE_LONG_EDGE` | `720` | 변환 시 축소할 긴 변 |
 | `DAON_SKIP_WARMUP` | (미설정) | `1`이면 기동 시 모델 사전 로딩 생략 |
+| `DAON_SKIP_SEED` | (미설정) | `1`이면 기동 시 시연 계정 시드 생략. 평소엔 건드리지 마세요 — 시드가 없으면 '체험하기'가 로그인에서 막힙니다 |
 
 `DAON_SECRET` 생성:
 
@@ -150,8 +151,17 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 `webservice/daon.db`는 **컨테이너 파일시스템**에 있습니다. 재배포하거나 인스턴스가
 재시작되면 사라집니다.
 
-- **데모 계정**은 기동 시 `python -m webservice.seed`가 다시 만들어주므로 괜찮습니다
+- **데모 계정**은 기동 시 다시 만들어지므로 괜찮습니다. Dockerfile 의 CMD
+  (`python -m webservice.seed`)뿐 아니라 앱 startup 에서도 한 번 더 시드합니다 —
+  배포 플랫폼에서 Start Command 를 직접 지정하면 CMD 가 통째로 무시되기 때문입니다
 - **생성된 리포트와 보호자 매칭은 사라집니다**
+
+> **DB 가 날아가면 예전 로그인 쿠키가 남아 문제를 일으킵니다.** 세션은 서명된
+> 쿠키에만 있고 `DAON_SECRET` 은 그대로라, DB 가 새로 만들어져도 옛 쿠키는 계속
+> 유효합니다. 그 안의 사용자 id 는 새 DB 에 없으므로 저장이 전부
+> `FOREIGN KEY constraint failed` 로 실패합니다(리포트 저장·어르신 추가·카메라
+> 등록이 한꺼번에). 지금은 `routes_auth.current_user` 가 매 요청 세션을 DB 와
+> 대조해, 같은 이메일 계정으로 자동 복구하거나 401 로 로그인 화면에 돌려보냅니다.
 
 전시 기간 동안 유지하려면 영구 볼륨을 붙이세요.
 

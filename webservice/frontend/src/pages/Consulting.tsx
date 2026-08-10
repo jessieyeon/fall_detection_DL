@@ -255,7 +255,11 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
             return (
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {available ? (
-                  <video key={s.id} src={s.file} controls muted loop playsInline
+                  // loop 를 뺐다. 끝나면 멈춰야 '이 영상을 다 봤다 → 이제
+                  // 분석을 눌러 보자'로 이어진다. 계속 되감기면 다음에 뭘 해야
+                  // 하는지가 흐려진다.
+                  <video key={s.id} src={s.file} controls muted playsInline
+                         preload="metadata"
                          style={{ display: "block", width: "100%", maxHeight: 320,
                                   background: "#0E1116" }} />
                 ) : (
