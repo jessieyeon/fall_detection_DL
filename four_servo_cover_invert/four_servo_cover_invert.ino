@@ -11,22 +11,27 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 const int SERVO_CH[NUM_SERVOS] = {1, 3, 5, 7};  // 타일 0~3 이 연결된 PCA9685 채널
 const int COVER_CH[NUM_SERVOS] = {2, 4, 6, 8};  // 각 타일의 덮개 서보 (타일 i 와 세트)
 
+// 덮개 1, 3 은 0, 2 와 반대편에 장착돼 있어 여는 회전 방향을 뒤집는다.
+// 타일 서보는 넷 다 같은 방향 그대로다. 덮개만 해당된다.
+const bool COVER_INVERT[NUM_SERVOS] = {false, true, false, true};
+
 // 일반적인 서보 기준값 (필요시 미세조정)
 #define SERVO_MIN  102    // 약 0도, 0.5ms 펄스
 #define SERVO_MAX  512    // 약 180도, 2.5ms 펄스
 
 #define HOME_ANGLE     0   // 타일 초기/복귀 위치
-#define MOVE_ANGLE    60   // 타일 작동 위치
-#define COVER_CLOSED  0   // 덮개 닫힘 (기준 위치)
-#define COVER_OPEN    120   // 덮개 열림 (닫힘에서 시계방향 90도)
-// 닫힘을 180°, 열림을 90°로 두어 여는 회전이 시계 방향이 되게 한다.
-// 방향이 반대면 두 값을 (0, 90) 으로 되돌리면 반시계로 바뀐다.
+#define MOVE_ANGLE    48   // 타일 작동 위치
+#define COVER_CLOSED   0   // 덮개 닫힘
+#define COVER_OPEN    90   // 덮개 열림 (90도 회전)
 
-// 덮개가 90도 열릴(또는 타일이 내려갈) 때까지 기다리는 시간.
-// 표준 서보의 90도 이동은 대략 0.15~0.3초라 이 정도면 덮개가 먼저 비켜난다.
+// 발사: 덮개가 90도 열릴 때까지 기다리는 시간.
 // 타일이 덮개를 치면 늘리고, 더 빠른 서보면 줄인다.
 // ponytail: 물리 튜닝값. 하드웨어에 맞춰 조정하는 손잡이.
-#define SEQ_DELAY_MS 200
+#define FIRE_DELAY_MS 300
+
+// 복귀: 타일이 다 내려갈 때까지 기다리는 시간.
+// 내려오는 쪽이 빨라 발사보다 짧아도 된다.
+#define RESET_DELAY_MS 200
 
 bool moved[NUM_SERVOS] = {false, false, false, false};
 
@@ -44,7 +49,11 @@ void moveServo(int index, int angle) {
 }
 
 void moveCover(int index, int angle) {
-  pwm.setPWM(COVER_CH[index], 0, angleToPulse(angle));
+  // 반전 대상은 닫힘~열림 구간의 중심을 기준으로 대칭 이동시킨다.
+  // 회전 폭(90도)은 그대로고 방향만 반대가 된다. 명령 각도가 0~90 을
+  // 벗어나지 않아 서보 가동 범위 끝단에 걸릴 일도 없다.
+  int a = COVER_INVERT[index] ? (COVER_CLOSED + COVER_OPEN - angle) : angle;
+  pwm.setPWM(COVER_CH[index], 0, angleToPulse(a));
 }
 
 bool isAllDigits(const char *s) {
@@ -86,16 +95,12 @@ void handleFire(char *args) {
     return;
   }
 
-  // 배터리 용량 한계로 한 번에 타일 1장만 작동한다(타일 서보 + 덮개 서보 = 모터 2개).
-  // 여러 장이 요청돼도 첫 번째만 올린다. 파이썬도 같은 규칙으로 1장만 보내므로 에코가 맞는다.
-  if (count > 1) count = 1;
-
   // 세트 서보를 먼저 열어 덮개를 치운 뒤 → 잠깐 기다렸다가 → 타일을 올린다.
   // 여러 장이 동시에 발사돼도 지연은 한 번만 지불해 빠르게 유지한다.
   for (int i = 0; i < count; i++) {
     moveCover(wanted[i], COVER_OPEN);
   }
-  delay(SEQ_DELAY_MS);
+  delay(FIRE_DELAY_MS);
   for (int i = 0; i < count; i++) {
     moveServo(wanted[i], MOVE_ANGLE);
     moved[wanted[i]] = true;
@@ -122,7 +127,7 @@ void handleReset() {
     }
   }
   if (any) {
-    delay(SEQ_DELAY_MS);
+    delay(RESET_DELAY_MS);
     for (int i = 0; i < NUM_SERVOS; i++) {
       if (moved[i]) {
         moveCover(i, COVER_CLOSED);
@@ -164,6 +169,7 @@ void setup() {
   // '#' 로 시작하는 줄은 파이썬 파서가 무시한다. 사람이 읽을 안내문을 남겨도 된다.
   // 서보는 물리적으로 8개(타일 4 + 덮개 4)지만 READY 는 타일 수만 보고한다.
   Serial.println("# 초기화 완료. 타일 0~3 = HOME, 덮개 = 닫힘.");
+  Serial.println("# 덮개 1, 3 은 반전 버전 (여는 방향 반대).");
   Serial.println("# 명령: FIRE 0,2 / RESET / PING");
   Serial.print("READY ");
   Serial.println(NUM_SERVOS);

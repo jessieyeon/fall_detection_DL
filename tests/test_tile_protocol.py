@@ -134,8 +134,55 @@ def test_missing_ack_returns_false_within_timeout():
     controller.connect("/dev/fake")
     started = time.monotonic()
     assert controller.fire({1}) is False
-    # 설계 문서 §7.3: 응답 대기가 영상 루프를 오래 막으면 안 된다
-    assert time.monotonic() - started < 0.5
+    # 설계 문서 §7.3: 응답 대기가 영상 루프를 오래 막으면 안 된다.
+    # 상한은 RESPONSE_TIMEOUT 에 매어 둔다 - 숫자를 그대로 적어두면 타임아웃을
+    # 조정할 때마다 이 테스트가 관계없이 깨진다.
+    assert time.monotonic() - started < tile_protocol.RESPONSE_TIMEOUT + 0.3
+
+
+class SlowFakeSerial(FakeSerial):
+    """OK 를 보내기 전에 펌웨어처럼 뜸을 들이는 보드.
+
+    실제 펌웨어의 handleFire 는 덮개를 연 뒤 SEQ_DELAY_MS(200ms) 를 기다렸다가
+    타일을 올리고, 그 **뒤에** OK 를 보낸다.
+    """
+
+    def __init__(self, responses=None, delay=0.0, reply=None):
+        super().__init__(responses)
+        self._delay = delay
+        self._reply = reply
+
+    def write(self, data):
+        super().write(data)
+        if self._reply is not None and data != b"PING\n":
+            time.sleep(self._delay)
+            self._pending.append(self._reply)
+
+
+def test_ack_is_accepted_when_board_replies_after_its_move_delay():
+    """펌웨어가 서보를 다 움직인 뒤 OK 를 보내도 ack 를 놓치지 않는다.
+
+    회귀 테스트다. RESPONSE_TIMEOUT 이 펌웨어의 SEQ_DELAY_MS 와 똑같이 0.2 였을
+    때, 응답이 매번 데드라인 직후에 도착해 ack 가 항상 False 로 돌아왔다.
+    아두이노는 멀쩡히 움직이는데 main.py 는 ack 를 보고 화면 타일을 켜므로,
+    '서보만 움직이고 화면은 가만히 있는' 증상이 났다.
+    """
+    fake = SlowFakeSerial(["READY 4"], delay=0.25, reply="OK FIRE 1")
+    controller = tile_protocol.TileController(
+        serial_factory=lambda port, baud, read_timeout: fake
+    )
+    controller.connect("/dev/fake")
+    assert controller.fire({1}) is True
+
+
+def test_response_timeout_exceeds_firmware_move_delay():
+    """타임아웃은 펌웨어의 동작 지연보다 넉넉히 커야 한다.
+
+    펌웨어(hardware/four_servo_control)의 SEQ_DELAY_MS 는 200ms 다. 이 값을
+    늘리면 여기 상수도 같이 올려야 한다 - 안 그러면 위 회귀가 되살아난다.
+    """
+    firmware_move_delay = 0.2
+    assert tile_protocol.RESPONSE_TIMEOUT > firmware_move_delay * 2
 
 
 def test_reset_and_ping():

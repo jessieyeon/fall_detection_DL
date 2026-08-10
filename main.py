@@ -4,6 +4,7 @@
     python main.py                                    웹캠
     python main.py test_videos/S01T13R01_.mp4         녹화 영상
     python main.py --port /dev/cu.usbmodemXXXX        아두이노 연결
+    python main.py --profile demo                     전시 시연 프로파일(오경보 억제)
     python main.py --profile doll                     인형 프로파일
     python main.py --no-serial                        임계값 튜닝용 (서보 안 움직임)
 """
@@ -23,7 +24,11 @@ import pose_source
 import tile_protocol
 import tiles
 
-RISK_COOLDOWN = 3.0    # 같은 낙상에 대해 다시 발사하기까지 기다리는 시간(초)
+# 같은 낙상에 대해 다시 발사하기까지 기다리는 시간(초).
+# 3초에서 늘렸다. 오경보가 한 번 나면 3초 뒤에 또 나서 시연 설명이 계속 끊겼다.
+# 늘려도 잃는 것은 연속 시연의 대기시간뿐이고, RESET_DELAY(2초) 보다는 커야
+# 타일이 내려간 뒤에 다음 발사가 온다.
+RISK_COOLDOWN = 6.0
 RESET_DELAY = 2.0      # 발사 후 원위치 신호를 보내기까지의 시간(초)
 LOG_FILE = "fall_risk_log.csv"
 

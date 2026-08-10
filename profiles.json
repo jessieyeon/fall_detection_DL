@@ -7,6 +7,14 @@
     "tau_lean": 0.15,
     "window": 8
   },
+  "demo": {
+    "persistence": 4,
+    "prob_threshold": 0.30,
+    "tau_R": 0.85,
+    "tau_R_strict": 0.95,
+    "tau_lean": 0.15,
+    "window": 8
+  },
   "doll": {
     "persistence": 3,
     "prob_threshold": 0.05,

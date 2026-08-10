@@ -15,7 +15,15 @@ import time
 
 BAUD = 115200
 SERIAL_READ_TIMEOUT = 0.05   # readline() 한 번이 블로킹되는 최대 시간(초)
-RESPONSE_TIMEOUT = 0.2       # 명령 하나에 대한 응답을 기다리는 최대 시간(초)
+# 명령 하나에 대한 응답을 기다리는 최대 시간(초).
+#
+# 반드시 펌웨어의 SEQ_DELAY_MS(현재 200ms)보다 넉넉히 커야 한다. FIRE 와 RESET 은
+# 덮개와 타일을 순서대로 움직이려고 중간에 delay 를 걸고, 그 **뒤에** OK 를 보내기
+# 때문이다. 예전 값 0.2 는 그 지연과 정확히 같아서 응답이 매번 데드라인 직후에
+# 도착했다 — 아두이노는 멀쩡히 움직이는데 ack 는 항상 False 로 돌아왔고,
+# main.py 가 ack 를 보고 화면 타일을 켜므로 '서보만 움직이고 화면은 가만히 있는'
+# 증상이 되었다. 시뮬레이션에서는 ack 가 원래 False 라 이 버그가 드러나지 않았다.
+RESPONSE_TIMEOUT = 0.6
 POLL_INTERVAL = 0.01         # 대기 루프가 CPU 를 독점하지 않도록 잠깐 양보하는 시간(초)
 READY_GRACE = 0.3            # PING 을 찌르기 전에 부팅 READY 를 먼저 기다려보는 시간(초)
 
