@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { login, type User } from "../api";
 import { setFlag, TOUR_SEEN } from "../storage";
 import { color, font, radius, shadow } from "../theme";
-import { Shield } from "../ui/icons";
+import Logo from "../ui/Logo";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 
@@ -66,17 +66,8 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
         display: "flex", flexDirection: "column", gap: 20,
       }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{
-              width: 32, height: 32, borderRadius: 9, background: color.brand,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <Shield size={18} color={color.white} />
-            </span>
-            <span style={{ fontSize: font.h1, fontWeight: 700, letterSpacing: -0.3 }}>
-              다온 안전지킴이
-            </span>
-          </div>
+          {/* 첫 화면이라 워드마크를 헤더보다 크게 쓴다. */}
+          <Logo height={30} />
           <p style={{ margin: 0, fontSize: font.small, color: color.inkSoft, lineHeight: 1.6 }}>
             생활 영상으로 집 안 동선을 분석해 낙상 위험 구역을 찾아드립니다.
           </p>

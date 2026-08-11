@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { color, font, radius } from "../theme";
 import { useIsMobile } from "../useMedia";
-import { Shield, Clipboard, Video, Person } from "./icons";
+import { Clipboard, Video, Person } from "./icons";
+import Logo from "./Logo";
 
 type Tab = "consult" | "monitor" | "mypage";
 
@@ -23,22 +24,10 @@ const NAV: {
   { tab: "consult", to: "/consulting", label: "컨설팅", Icon: Clipboard },
 ];
 
-function Brand({ compact }: { compact?: boolean }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-      <span style={{
-        width: 28, height: 28, borderRadius: 8, background: color.brand,
-        display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-      }}>
-        <Shield size={16} color={color.white} />
-      </span>
-      {!compact && (
-        <span style={{ fontSize: font.h2, fontWeight: 700, letterSpacing: -0.2 }}>
-          다온 안전지킴이
-        </span>
-      )}
-    </div>
-  );
+/** 헤더·사이드바의 브랜드 표시. 워드마크 하나로 끝낸다 —
+ *  옆에 '다온 안전지킴이'를 같이 두면 로고가 이미 말하는 이름을 한 번 더 쓰는 꼴이다. */
+function Brand() {
+  return <Logo height={22} />;
 }
 
 /**
