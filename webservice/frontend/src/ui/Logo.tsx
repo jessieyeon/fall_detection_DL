@@ -28,7 +28,7 @@ const RATIO = VIEW_W / VIEW_H;   // ≈ 4.57
 export default function Logo({
   height = 22,
   color = theme.brand,
-  title = "다온",
+  title = "DA:ON",
 }: {
   height?: number;
   color?: string;

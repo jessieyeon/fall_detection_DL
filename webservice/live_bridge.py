@@ -1,4 +1,4 @@
-"""main.py 감지 파이프라인 → 다온 웹플랫폼 실시간 중계 어댑터.
+"""main.py 감지 파이프라인 → DA:ON 웹플랫폼 실시간 중계 어댑터.
 
 webapp_server.WebAppServer 와 같은 인터페이스(start/push_pose/push_fall/push_reset/stop)를
 제공하는 드롭인이다. 자체 WebSocket 서버를 띄우는 대신 플랫폼의 POST /api/live/event 로

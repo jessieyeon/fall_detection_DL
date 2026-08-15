@@ -1,4 +1,4 @@
-"""다온 웹 서비스 FastAPI 진입점."""
+"""DA:ON 웹 서비스 FastAPI 진입점."""
 
 import mimetypes
 import os
@@ -17,7 +17,7 @@ from webservice.routes_home import router as home_router
 from webservice.routes_consulting import router as consulting_router
 from webservice.routes_live import router as live_router
 
-app = FastAPI(title="다온 낙상 케어")
+app = FastAPI(title="DA:ON 낙상 케어")
 
 # 온라인 전시 사이트가 이 앱을 iframe 으로 임베드한다. 그러면 우리 쿠키는
 # '서드파티 쿠키'가 되어, 기본값(SameSite=lax)에서는 브라우저가 보내지 않는다.

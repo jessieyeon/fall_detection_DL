@@ -45,9 +45,9 @@ type Step = {
 const STEPS: Step[] = [
   {
     route: "/mypage",
-    title: "다온 안전지킴이",
-    lead: "다온앱에 오신 것을 환영합니다.\n"
-        + "지금부터 다온의 주요 기능을 간단히 소개해 드릴게요.",
+    title: "DA:ON",
+    lead: "DA:ON 앱에 오신 것을 환영합니다.\n"
+        + "지금부터 DA:ON의 주요 기능을 간단히 소개해 드릴게요.",
   },
   {
     target: "nav-mypage",

@@ -265,7 +265,7 @@ export default function Live() {
             <p style={{ margin: "6px 0 0", fontSize: font.small, color: color.inkSoft, lineHeight: 1.6 }}>
               {on
                 ? "지금 바로 실시간 낙상 감지 화면을 볼 수 있습니다."
-                : "집에 설치된 다온 카메라를 연결해 주세요."}
+                : "집에 설치된 DA:ON 카메라를 연결해 주세요."}
             </p>
           </div>
           <Button big onClick={connect} icon={<Video size={17} color={color.white} />}>
@@ -538,7 +538,7 @@ export default function Live() {
 function HowItConnects() {
   const steps = [
     { n: "1", t: "카메라를 집 와이파이에 연결합니다",
-      d: "다온 카메라는 인터넷(와이파이)으로 연결됩니다. 블루투스나 컴퓨터에 꽂는 선은 필요하지 않습니다." },
+      d: "DA:ON 카메라는 인터넷(와이파이)으로 연결됩니다. 블루투스나 컴퓨터에 꽂는 선은 필요하지 않습니다." },
     { n: "2", t: "AI가 자세를 읽고 위험을 판단합니다",
       d: "사람이 지나가면 관절 위치를 알아보고, 넘어질 위험이 있는지 매 순간 판단합니다. 위험이 감지되면 넘어지는 방향의 타일이 즉시 펴집니다." },
     { n: "3", t: "이 화면에 자동으로 나타납니다",

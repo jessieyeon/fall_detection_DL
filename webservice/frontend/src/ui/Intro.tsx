@@ -27,7 +27,7 @@ const GUIDES = [
     Icon: Video,
     title: "실시간",
     body: "카메라를 연결하면 AI가 인식한 자세(스켈레톤)를 실시간으로 볼 수 있습니다.",
-    hint: "카메라 연결은 다온 카메라가 설치된 환경에서만 가능해요. 준비되지 않았다면 데모 영상으로 확인해주세요.",
+    hint: "카메라 연결은 DA:ON 카메라가 설치된 환경에서만 가능해요. 준비되지 않았다면 데모 영상으로 확인해주세요.",
   },
 ];
 
@@ -39,12 +39,12 @@ export default function Intro({ onClose }: { onClose: () => void }) {
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div>
           <div style={{ fontSize: font.h2, fontWeight: 700 }}>
-            다온 안전지킴이 체험에 오신 것을 환영합니다
+            DA:ON 체험에 오신 것을 환영합니다
           </div>
           <p style={{
             margin: "6px 0 0", fontSize: font.small, color: color.inkSoft, lineHeight: 1.65,
           }}>
-            다온 안전지킴이는 어르신의 안전한 일상을 위해 <b>컨설팅</b>과{" "}
+            DA:ON은 어르신의 안전한 일상을 위해 <b>컨설팅</b>과{" "}
             <b>실시간 감지</b>를 제공하는 <b>시설 관리자용 앱</b>입니다.
             세대 내부부터 공용 라운지·복도까지, 어르신이 지나다니는 곳의 위험을
             미리 확인하고 대비할 수 있어요.
@@ -104,7 +104,7 @@ export default function Intro({ onClose }: { onClose: () => void }) {
         <span style={{ fontSize: font.caption, color: color.ink, lineHeight: 1.7 }}>
           고령자 안전사고의 <b>62.7%가 낙상</b>이고, 그 낙상의 <b>74.8%가 생활공간
           안</b>에서 일어납니다. 특정 공간이 더 위험해서가 아니라, 매일 지나다니는
-          곳이기 때문입니다. 다온은 실제 생활 동선을 재서{" "}
+          곳이기 때문입니다. DA:ON은 실제 생활 동선을 재서{" "}
           <b>어디를 먼저 손봐야 하는지</b> 알려드립니다.
         </span>
       </div>
