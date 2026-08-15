@@ -55,6 +55,23 @@ input:focus { border-color: #1428A0 !important; }
 
 @keyframes daon-spin { to { transform: rotate(360deg); } }
 
+/* 낙상 경고 배너. 부스에서 몇 걸음 떨어져 보는 사람의 눈에 걸리도록 한 번
+   튀어나오고, 그다음에는 은은하게 숨쉰다. 계속 세게 깜빡이면 읽기 힘들고
+   보는 사람을 지치게 한다. */
+@keyframes daon-alert-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes daon-alert-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0.45); }
+  50%      { box-shadow: 0 0 0 10px rgba(198, 40, 40, 0); }
+}
+
+/* 화면 깜빡임에 민감한 사용자에게는 움직임을 주지 않는다. */
+@media (prefers-reduced-motion: reduce) {
+  .daon-alert { animation: none !important; }
+}
+
 /* 애니메이션을 줄이도록 설정한 사용자를 존중한다 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

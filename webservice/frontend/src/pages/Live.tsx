@@ -38,9 +38,15 @@ type Stage = "idle" | "searching" | "none" | "demo" | "self";
  * 타임아웃에 걸려 '카메라 없음'으로 빠진다. */
 function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
                      pausedRef: React.RefObject<boolean>,
-                     deviceRef: React.RefObject<string>) {
+                     deviceRef: React.RefObject<string>,
+                     onFall?: (fallen: boolean) => void) {
   const stateRef = useRef<LiveState>({ landmarks: null, tiles: [], rows: 2, cols: 2 });
   const lastPose = useRef<number | null>(null);
+
+  // 콜백을 ref 로 들고 있는다. 아래 effect 의 의존성에 넣으면 부모가 리렌더할
+  // 때마다(0.5초 tick 이 있다) WebSocket 이 끊겼다 다시 붙는다.
+  const onFallRef = useRef(onFall);
+  onFallRef.current = onFall;
 
   useEffect(() => {
     let ws: WebSocket | undefined;
@@ -59,8 +65,11 @@ function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
         if (m.device && dev && m.device !== dev) return;
         const s = stateRef.current;
         if (m.type === "pose") { s.landmarks = m.landmarks; lastPose.current = Date.now(); }
-        else if (m.type === "fall") { s.tiles = m.tiles || []; s.rows = m.rows || s.rows; s.cols = m.cols || s.cols; }
-        else if (m.type === "reset") { s.tiles = []; }
+        else if (m.type === "fall") {
+          s.tiles = m.tiles || []; s.rows = m.rows || s.rows; s.cols = m.cols || s.cols;
+          onFallRef.current?.(true);
+        }
+        else if (m.type === "reset") { s.tiles = []; onFallRef.current?.(false); }
       };
     };
     connect();
@@ -198,7 +207,10 @@ export default function Live() {
   const deviceRef = useRef("");
   deviceRef.current = device;
 
-  const lastPose = useLiveFeed(canvasRef, pausedRef, deviceRef);
+  // 낙상 경고 배너. 파이프라인이 fall 을 보내면 뜨고, reset 을 보내면 내려간다
+  // (타일 불이 꺼지는 것과 같은 시점). 사용자가 직접 닫을 수도 있다.
+  const [fallAlert, setFallAlert] = useState(false);
+  const lastPose = useLiveFeed(canvasRef, pausedRef, deviceRef, setFallAlert);
 
   async function togglePause() {
     const next = !paused;
@@ -244,6 +256,8 @@ export default function Live() {
 
   return (
     <AppShell active="monitor">
+      {fallAlert && <FallBanner onClose={() => setFallAlert(false)} />}
+
       <h1 style={{ margin: 0, fontSize: font.h1, fontWeight: 700 }}>실시간 감지</h1>
 
       {stage === "idle" && (
@@ -528,6 +542,48 @@ export default function Live() {
         </>
       )}
     </AppShell>
+  );
+}
+
+
+/**
+ * 낙상 경고 배너.
+ *
+ * 파이프라인이 `fall` 을 보내면 뜨고 `reset` 을 보내면 내려간다 — 캔버스의 타일
+ * 불이 켜지고 꺼지는 것과 정확히 같은 시점이라, 화면의 두 신호가 어긋나지 않는다.
+ * 관람객이 직접 닫을 수도 있다.
+ *
+ * `role="alert"` 은 스크린리더가 이 문장을 즉시 읽게 한다. 낙상 경고는 사용자가
+ * 화면을 보고 있지 않을 수도 있는 종류의 정보다.
+ */
+function FallBanner({ onClose }: { onClose: () => void }) {
+  return (
+    <div role="alert" className="daon-alert" style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "14px 16px", borderRadius: radius.md,
+      background: color.red, color: color.white,
+      animation: "daon-alert-in .25s ease-out, daon-alert-pulse 1.8s ease-out .25s infinite",
+    }}>
+      <span style={{
+        width: 30, height: 30, flexShrink: 0, borderRadius: "50%",
+        background: "rgba(255,255,255,0.22)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <Alert size={17} color={color.white} />
+      </span>
+      <span style={{
+        flex: 1, fontSize: font.h2, fontWeight: 700, letterSpacing: -0.2,
+      }}>
+        낙상이 감지되었습니다
+      </span>
+      <button onClick={onClose} aria-label="경고 닫기" style={{
+        flexShrink: 0, padding: "5px 10px", borderRadius: radius.sm,
+        background: "rgba(255,255,255,0.18)", color: color.white,
+        fontSize: font.caption, fontWeight: 600,
+      }}>
+        닫기
+      </button>
+    </div>
   );
 }
 
