@@ -19,6 +19,12 @@ itsdangerous==2.2.0
 httpx==0.27.0
 python-multipart==0.0.9
 
+# --- 운영 모니터링 ---
+# SENTRY_DSN 이 없으면 임포트만 되고 아무 동작도 하지 않는다(observability.py).
+# [fastapi] 엑스트라가 starlette/fastapi 통합을 끌어온다 — 이게 있어야 에러에
+# '어떤 요청에서 났는지'가 붙는다. 순수 파이썬이라 이미지 크기는 ~2MB 만 는다.
+sentry-sdk[fastapi]==2.68.0
+
 # --- 컨설팅 분석 (YOLO11 사람 검출) ---
 # headless: 서버에는 GUI가 없다. GUI 빌드(opencv-contrib-python)는 libGL 등
 # 시스템 라이브러리를 요구해서 슬림 이미지에서 임포트가 실패한다.

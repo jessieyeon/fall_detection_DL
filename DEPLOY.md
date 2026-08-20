@@ -137,6 +137,26 @@ iOS Safari는 서드파티 쿠키에 특히 엄격합니다.
 | `DAON_TRANSCODE_LONG_EDGE` | `720` | 변환 시 축소할 긴 변 |
 | `DAON_SKIP_WARMUP` | (미설정) | `1`이면 기동 시 모델 사전 로딩 생략 |
 | `DAON_SKIP_SEED` | (미설정) | `1`이면 기동 시 시연 계정 시드 생략. 평소엔 건드리지 마세요 — 시드가 없으면 '체험하기'가 로그인에서 막힙니다 |
+| `DAON_DATA_DIR` | (미설정) | DB·업로드·리포트를 둘 경로. 영구 볼륨을 붙였을 때만 설정합니다(§6). 미설정이면 예전대로 `webservice/` 안에 씁니다 |
+
+### 운영 모니터링 (전부 선택 — 비워두면 그 기능만 꺼집니다)
+
+| 변수 | 설명 |
+|---|---|
+| `SENTRY_DSN` | **서버** 에러 수집. 비우면 Sentry 코드가 아예 안 돕니다 |
+| `SENTRY_DSN_FRONTEND` | **브라우저** 에러 수집. 서버와 다른 프로젝트를 쓰면 값이 다릅니다 |
+| `SENTRY_ENV` | 기본 `production`. 스테이징을 따로 띄우면 구분값을 주세요 |
+| `SENTRY_TRACES_RATE` | 기본 `0.1`. 성능 트레이스 표본 비율(에러는 항상 100%) |
+| `POSTHOG_KEY` | 퍼널 분석. PostHog 프로젝트의 Project API Key |
+| `POSTHOG_HOST` | 기본 `https://us.i.posthog.com`. EU 프로젝트면 `https://eu.i.posthog.com` |
+
+> **왜 `VITE_` 접두사가 아닌가.** 프런트엔드는 Dockerfile 1단계에서 빌드되는데,
+> Vite 는 `import.meta.env.VITE_*` 를 **빌드 시점에** 문자열로 박아 넣습니다.
+> 플랫폼 Variables 에 값을 넣어도 빌드 인자로 따로 넘기지 않으면 번들에는 빈
+> 값이 들어가고, 배포는 성공하고 에러도 안 나고 데이터만 안 들어옵니다 —
+> 제일 알아채기 어려운 형태의 실패입니다. 그래서 서버가 `/api/config` 로
+> 런타임에 내려주고, 프런트가 기동 직후 읽어갑니다. **값을 바꾸면 재시작만
+> 하면 되고 재빌드가 필요 없습니다.**
 
 `DAON_SECRET` 생성:
 
@@ -165,10 +185,34 @@ python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 
 전시 기간 동안 유지하려면 영구 볼륨을 붙이세요.
 
-- Railway: Settings → Volumes → Mount path `/app/webservice`
-- Render: Disks → Mount path `/app/webservice`
+> ⚠️ **`/app/webservice` 에 붙이면 안 됩니다.** (예전 이 문서의 안내가 그랬습니다.)
+> 그 경로에는 데이터뿐 아니라 **코드가 같이 있습니다** — `app.py`, `routes_*.py`,
+> `consulting/*.py`, `frontend/dist` 가 전부 거기입니다. Railway/Render 볼륨은
+> 도커의 named volume 과 달리 이미지의 기존 내용을 볼륨으로 복사해주지 않고
+> 그냥 **덮어 가립니다.** 빈 볼륨이 코드를 가리므로 서버는
+> `ModuleNotFoundError: webservice.app` 로 기동조차 못 하고 재시작을 반복합니다.
 
-리포트 이미지(`webservice/consulting/reports/`)도 같은 경로 아래라 함께 보존됩니다.
+데이터만 따로 빠지도록 `DAON_DATA_DIR` 을 두었습니다. 코드가 없는 경로에 볼륨을
+붙이고 그 경로를 가리키세요.
+
+1. Railway: Settings → Volumes → Mount path **`/app/data`**
+   (Render: Disks → Mount path `/app/data`)
+2. Variables 에 `DAON_DATA_DIR=/app/data` 추가
+3. 재배포
+
+| | 위치 | 재배포 후 |
+|---|---|---|
+| `DAON_DATA_DIR` 미설정 (기본) | `webservice/daon.db`, `webservice/consulting/{uploads,reports}` | 사라짐 |
+| `DAON_DATA_DIR=/app/data` + 볼륨 | `/app/data/daon.db`, `/app/data/consulting/{uploads,reports}` | **보존됨** |
+
+환경변수를 넣지 않으면 동작이 예전과 완전히 같습니다 — 로컬 개발은 신경 쓸 게 없습니다.
+
+`consulting/samples/`(사전 계산된 샘플 리포트)는 **데이터가 아니라 코드**라 볼륨으로
+옮기지 않습니다. 저장소에 커밋돼 이미지에 들어가고, 재배포해도 그대로 있습니다.
+
+> **볼륨을 붙이는 그 배포에서도 기존 데이터는 한 번 날아갑니다.** 볼륨은 빈 채로
+> 시작하고, 컨테이너 안에 있던 예전 `daon.db` 를 옮겨주지 않기 때문입니다.
+> 보존은 **그 다음 재배포부터** 적용됩니다. 그러니 붙이려면 빠를수록 좋습니다.
 
 작업 G(결과 캐싱)를 마치면 샘플 영상 3개의 리포트는 코드에 포함되므로,
 휘발되어도 체험 자체는 계속 됩니다.
@@ -232,3 +276,125 @@ python3 scripts/build_samples.py --auto
 
 **iframe은 뜨는데 로그인만 안 된다**
 → `DAON_EMBED=1` 누락. §4 참고.
+
+**PostHog에 이벤트가 하나도 안 들어온다**
+→ 배포 URL로 `/api/config`를 열어 `posthog_key`가 채워져 있는지 먼저 보세요.
+비어 있으면 환경변수 문제(§5), 채워져 있는데도 안 들어오면 광고 차단기입니다 —
+관람객 일부는 원래 안 잡힙니다. §9 참고.
+
+**Sentry에 에러가 안 뜬다**
+→ 서버 로그에 `[sentry] 활성화됨`이 있는지 보세요. 없으면 `SENTRY_DSN` 미설정입니다.
+401·404·503은 **일부러** 걸러냅니다(정상 동작이라서). 테스트하려면 진짜 500을 내세요.
+
+---
+
+## 9. 운영 도구 — 전시 기간(~9/15) 모니터링
+
+세 가지를 붙였습니다. 셋 다 무료 티어로 충분하고, **환경변수를 비우면 그 도구만
+꺼집니다** — 코드를 되돌릴 필요가 없습니다.
+
+| 도구 | 답해주는 질문 | 알림 |
+|---|---|---|
+| Sentry | 관람객이 어떤 에러를 겪었나 | 이메일 |
+| PostHog | 어디서 이탈하나 | 없음(직접 열어봄) |
+| UptimeRobot | 서버가 살아 있나 | 이메일/카톡 |
+
+### 9-1. Sentry
+
+sentry.io 가입 → 프로젝트를 **두 개** 만듭니다. Python(FastAPI) 하나, React 하나.
+서버 에러와 브라우저 에러는 성격이 완전히 달라서 한 프로젝트에 섞으면 둘 다
+읽기 어려워집니다.
+
+각 프로젝트의 DSN을 `SENTRY_DSN`(서버)과 `SENTRY_DSN_FRONTEND`(브라우저)에
+넣고 재배포하면 끝입니다.
+
+이미 해둔 것:
+
+- **401·403·404·405·503은 안 보냅니다.** 전부 정상 동작입니다 — 503은 혼잡할 때
+  우리가 일부러 거절하는 것이고(§7), 404는 봇 스캔이 하루 수백 건 만듭니다.
+  안 걸러내면 전시 첫날 대시보드가 이걸로 덮여 진짜 에러가 묻힙니다
+- **관람객 IP·쿠키를 보내지 않습니다**(`send_default_pii=False`)
+- **세션 리플레이는 껐습니다.** 관람객 화면을 그대로 녹화하는 기능이라 전시
+  앱에서는 개인정보 부담이 큽니다. 화면 흐름은 PostHog로 봅니다
+- **분석 실패는 직접 보냅니다.** `try/catch`로 화면에 안내를 띄우고 끝나는 실패는
+  Sentry가 자동으로 못 잡는데, 이 앱에서 제일 아픈 실패가 정확히 그 모양입니다
+
+무료 티어는 월 5,000 이벤트입니다. 한 달 전시라면 넉넉하지만, 한 에러가 반복
+발생하면 며칠 만에 소진될 수 있습니다 — 그럴 땐 그 에러부터 고치는 게 맞습니다.
+
+### 9-2. PostHog
+
+posthog.com 가입 → 프로젝트 생성 → Project API Key를 `POSTHOG_KEY`에 넣습니다.
+가입 시 지역을 EU로 골랐다면 `POSTHOG_HOST=https://eu.i.posthog.com`도 함께.
+
+보내는 이벤트 (`webservice/frontend/src/analytics.ts`의 `EVENTS`):
+
+```
+app_opened          앱이 떴다                    ← 퍼널의 분모
+  └ guest_started   '체험하기'를 눌렀다
+      └ tour_shown  온보딩 안내가 떴다
+          └ tour_finished
+              └ analyze_started    영상을 올렸다  ← 진짜 첫 경험
+                  └ analyze_finished  리포트가 나왔다
+                  └ analyze_failed
+                      └ live_opened   실시간 화면까지 갔다
+```
+
+PostHog에서 **Product analytics → Funnels**로 이 순서대로 넣으면 단계별 이탈률이
+나옵니다. 전시 시작 후 3~4일쯤 보는 게 좋습니다 — 첫날 숫자는 지인 트래픽이 섞여
+왜곡됩니다.
+
+같이 보면 좋은 것:
+
+- `analyze_finished`의 `seconds` 속성 — 분석 대기가 몇 초부터 이탈로 이어지는지
+- `analyze_started`의 `source` — 샘플 영상 vs 직접 올린 영상 비율. 샘플만 쓰면
+  업로드 동선에 문제가 있다는 뜻입니다
+- `login_failed` — 이게 갑자기 늘면 시드가 안 돌아 데모 계정이 없는 상태입니다(§6)
+
+이미 해둔 것:
+
+- **자동 클릭 수집(autocapture)을 껐습니다.** 이름 없는 이벤트가 수천 개 쌓이면
+  무료 한도만 먹고 퍼널은 오히려 읽기 어려워집니다
+- **페이지뷰를 직접 보냅니다.** SPA라 주소가 바뀌어도 페이지 로드가 없어서,
+  자동 수집에 맡기면 모든 단계가 첫 화면 하나로 뭉쳐 보입니다
+- **iframe 안에서는 메모리 저장**으로 내립니다. 서드파티 쿠키·localStorage는
+  브라우저가 막거나 접근만 해도 예외를 던집니다(`storage.ts` 주석 참고).
+  새로고침마다 새 사람으로 세지지만, 한 방문 안의 퍼널은 그대로 읽힙니다
+- **관람객 IP를 저장하지 않습니다**(`ip: false`)
+- **SDK를 별도 청크로 분리**했습니다. PostHog+Sentry가 gzip 110KB라 그냥 넣으면
+  첫 로딩이 세 배가 됩니다 — 이탈을 재려다 이탈을 만드는 셈입니다. 지금은
+  첫 화면 번들이 예전(gzip 75KB)과 같고, 계측은 그 뒤에 따라붙습니다.
+  키를 안 넣으면 그 청크는 내려받지도 않습니다
+
+한계를 알고 보세요: 광고 차단기를 쓰는 관람객은 애초에 안 잡힙니다. 절대값이
+아니라 **단계 간 비율**로 읽으세요.
+
+### 9-3. UptimeRobot
+
+uptimerobot.com 가입 → Add New Monitor:
+
+| 항목 | 값 |
+|---|---|
+| Monitor Type | HTTP(s) |
+| URL | `https://<배포주소>/api/health` |
+| Monitoring Interval | 5 minutes (무료 최소) |
+| Alert Contacts | 본인 이메일 |
+
+`/api/health`는 프로세스가 살아 있는지만 보지 않고 **DB를 한 줄 읽어봅니다.**
+이 앱의 실제 사고가 '서버는 떠 있는데 DB가 날아가 쓰기만 전부 실패'였기
+때문입니다(§6). 실패하면 500을 내므로 UptimeRobot이 알림을 보냅니다.
+
+> 루트 URL(`/`)로 걸지 마세요. SPA 폴백이 무슨 일이 있어도 `index.html`을
+> 200으로 돌려주기 때문에, 백엔드가 완전히 망가져도 초록불로 보입니다.
+
+### 9-4. 전시 기간 체크 루틴
+
+**매일 1분** — Sentry 받은편지함에 새 에러가 있는지만 봅니다. 없으면 끝.
+
+**주 1회 5분** — PostHog 퍼널을 열어 이탈이 큰 단계를 하나 고릅니다. 그리고
+배포 URL로 `/api/metrics`를 열어 `slow_requests`와 `by_status`의 `503`을 봅니다.
+503이 쌓이고 있으면 동시 분석 상한에 계속 걸린다는 뜻이라, 인스턴스를 키우거나
+`DAON_MAX_CONCURRENT_JOBS`를 올릴 시점입니다(§7).
+
+**알림이 왔을 때** — UptimeRobot 다운 알림은 대개 재배포·재시작 중이거나
+메모리 부족입니다. 플랫폼 로그에서 OOM(`Killed`)부터 확인하세요.

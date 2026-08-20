@@ -14,7 +14,32 @@
 import os
 import sqlite3
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "daon.db")
+# 영속 데이터(DB·업로드·리포트 이미지)가 사는 곳.
+#
+# **왜 환경변수로 뺐나.** 예전에는 이 파일 옆(=webservice/)에 daon.db 를 두었다.
+# 재배포하면 컨테이너 파일시스템이 새로 만들어져 전부 날아가므로 영구 볼륨을
+# 붙여야 하는데, webservice/ 에는 **코드가 같이 들어 있다** — app.py,
+# routes_*.py, consulting/*.py, frontend/dist 가 전부 여기다. 이 경로에 볼륨을
+# 마운트하면 빈 볼륨이 그 위를 덮어써 코드가 통째로 가려지고, 서버는
+# `ModuleNotFoundError: webservice.app` 로 기동조차 못 한다. (Railway 볼륨은
+# 도커의 named volume 과 달리 이미지의 기존 내용을 볼륨으로 복사해주지 않는다.)
+#
+# 그래서 데이터만 따로 뺄 수 있게 했다. 볼륨은 코드가 없는 경로(/app/data)에
+# 붙이고 DAON_DATA_DIR 로 그 경로를 가리킨다.
+#
+# 기본값은 예전과 같은 위치다 — 환경변수를 안 넣으면 동작이 하나도 안 바뀐다.
+DATA_DIR = (os.environ.get("DAON_DATA_DIR")
+            or os.path.dirname(os.path.abspath(__file__)))
+
+DB_PATH = os.path.join(DATA_DIR, "daon.db")
+
+# 볼륨이 갓 붙은 첫 기동에는 이 디렉터리가 비어 있을 수 있다. 없으면
+# sqlite3.connect 가 'unable to open database file' 로 죽는데, 메시지만 봐서는
+# 권한 문제인지 경로 문제인지 알 수 없어 디버깅이 오래 걸린다.
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except OSError as _exc:               # 읽기전용 마운트 등 — 여기서 서버를 죽이진 않는다
+    print(f"[db] 데이터 디렉터리를 만들지 못했습니다 ({DATA_DIR}): {_exc}")
 
 # 카메라 설치 공간. SQL CHECK 로 박지 않고 파이썬 상수로 둔다 — 공간 이름은
 # 제품 서사에 따라 또 바뀔 수 있고, SQLite 는 CHECK 를 ALTER 로 못 고친다.

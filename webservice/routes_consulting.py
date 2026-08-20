@@ -14,9 +14,13 @@ from webservice.routes_auth import current_user
 
 router = APIRouter(prefix="/api/consulting")
 
-_BASE = os.path.dirname(os.path.abspath(__file__))
-_UPLOAD_DIR = os.path.join(_BASE, "consulting", "uploads")
-_REPORT_DIR = os.path.join(_BASE, "consulting", "reports")
+# 업로드 영상과 리포트 이미지는 **데이터**라 db.DATA_DIR 아래 둔다(db.py 주석 참고).
+# 반면 consulting/ 안의 .py 와 samples/ 는 **코드**라 이미지에 그대로 남는다 —
+# 둘을 한 디렉터리로 섞으면 볼륨을 붙이는 순간 코드가 가려진다.
+#
+# DAON_DATA_DIR 을 안 넣으면 예전과 똑같은 webservice/consulting/... 이 된다.
+_UPLOAD_DIR = os.path.join(db.DATA_DIR, "consulting", "uploads")
+_REPORT_DIR = os.path.join(db.DATA_DIR, "consulting", "reports")
 
 # 온라인 전시에서는 아무 파일이나 올라올 수 있다. 디스크와 변환 시간을 지킨다.
 # 200MB 인 이유: 아이폰으로 1분 남짓 찍으면 1080p 기준 100~150MB 가 예사다.

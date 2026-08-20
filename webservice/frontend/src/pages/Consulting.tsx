@@ -6,6 +6,7 @@ import {
 import { color, font, radius } from "../theme";
 import { useIsMobile } from "../useMedia";
 import { notifyDone, primeNotifications, stopTitleFlash } from "../notify";
+import { track, reportError, EVENTS } from "../analytics";
 import { Video, Alert, Check, Chevron } from "../ui/icons";
 import AppShell from "../ui/AppShell";
 import Section from "../ui/Section";
@@ -120,6 +121,14 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
     // 파일을 읽지 못한 실패는 시작 단계(영상 업로드)의 문제다
     const early = /변환|업로드|moov|열 수 없|Invalid data|읽을 수 없/i.test(rawMessage);
     const at = early ? 0 : stepRef.current;
+
+    // 이 실패는 try/catch 안에서 화면 안내로 끝나므로 window.onerror 를 타지
+    // 않는다 — 여기서 직접 보내지 않으면 Sentry 에는 영영 안 보인다. 그런데
+    // 관람객 입장에서는 '체험이 안 되는' 바로 그 순간이라, 이 앱에서 제일
+    // 먼저 알아야 할 에러다.
+    track(EVENTS.ANALYZE_FAILED, { at, early, reason: rawMessage.slice(0, 200) });
+    reportError(new Error(`분석 실패: ${rawMessage}`), { step: at, early });
+
     setStep(at);
     setFailedStep(at);
     setError(early
@@ -127,10 +136,20 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
       : "분석 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   }
 
-  async function run(file: File, label: string) {
+  async function run(file: File, label: string, source: "upload" | "sample" = "upload") {
     setError(""); setJustDone(false); setActive(null);
     setStep(0); stepRef.current = 0; setFailedStep(null); setBusy(true);
     primeNotifications();          // 사용자 제스처 안에서 권한을 물어둔다
+
+    // 퍼널의 핵심 구간. '올렸다'와 '결과를 봤다' 사이가 얼마나 새는지가
+    // 이 전시에서 제일 알고 싶은 숫자다.
+    const startedAt = Date.now();
+    track(EVENTS.ANALYZE_START, {
+      source,                                   // 샘플 vs 직접 올린 영상
+      size_mb: Math.round((file.size / 1048576) * 10) / 10,
+      location: label,
+    });
+
     try {
       const { job_id } = await analyzeVideo(file, label);
       for (let i = 0; i < 300; i++) {
@@ -140,6 +159,12 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
           await open(st.report_id);
           await loadList();
           setJustDone(true);
+          track(EVENTS.ANALYZE_DONE, {
+            source,
+            // 대기 시간이 길어지면 이탈이 는다. 초 단위로 남겨두면
+            // "몇 초부터 사람들이 떠나는지"를 나중에 볼 수 있다.
+            seconds: Math.round((Date.now() - startedAt) / 1000),
+          });
           notifyDone("분석이 완료되었습니다", `${label} 영상의 낙상 위험 리포트가 준비됐어요.`);
           return;
         }
@@ -173,7 +198,7 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
         throw new Error("샘플 영상을 아직 준비 중입니다");
       }
       setBusy(false);
-      await run(new File([blob], `${s.id}.mp4`, { type: "video/mp4" }), s.label);
+      await run(new File([blob], `${s.id}.mp4`, { type: "video/mp4" }), s.label, "sample");
     } catch (err) {
       setBusy(false);
       fail((err as Error).message);

@@ -11,11 +11,18 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from webservice import db, metrics
+from webservice.observability import init_sentry
 from webservice.routes_auth import router as auth_router
 from webservice.routes_admin import router as admin_router
 from webservice.routes_home import router as home_router
 from webservice.routes_consulting import router as consulting_router
 from webservice.routes_live import router as live_router
+
+# ⚠️ FastAPI() 인스턴스를 만들기 **전에** 불러야 한다. Sentry 의 Starlette 통합은
+# init 시점에 미들웨어 클래스를 감싸므로, 앱이 먼저 만들어지면 그 감싸기가
+# 이미 조립된 미들웨어 스택에 적용되지 않아 요청 컨텍스트(경로·메서드)가 빠진 채
+# 에러만 올라온다. 아래 두 줄의 순서를 바꾸지 말 것.
+init_sentry()
 
 app = FastAPI(title="DA:ON 낙상 케어")
 
@@ -137,7 +144,52 @@ def _warm_yolo():
 
 @app.get("/api/health")
 def health():
+    """UptimeRobot 이 5분마다 두드리는 곳.
+
+    프로세스가 살아 있는지만 보면 놓치는 고장이 있다. 이 앱의 실제 사고는
+    '서버는 떠 있는데 DB 가 날아가 쓰기가 전부 실패'였다(DEPLOY.md §6).
+    그래서 여기서 users 를 한 줄 세어본다 — 인덱스도 안 타는 작은 쿼리라
+    5분에 한 번은 공짜나 다름없고, 대신 그 사고를 잡아낸다.
+
+    실패하면 500 을 낸다. UptimeRobot 은 상태코드로 판단하므로 본문에
+    'error' 를 적어두고 200 을 주면 알림이 오지 않는다.
+    """
+    try:
+        conn = db.connect()
+        try:
+            conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        finally:
+            conn.close()
+    except Exception as exc:                  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"db unavailable: {exc}")
     return {"status": "ok"}
+
+
+@app.get("/api/config")
+def get_config():
+    """프런트가 기동 직후 읽어가는 공개 설정.
+
+    **왜 빌드타임 VITE_ 환경변수를 쓰지 않나.** 이 프런트는 Dockerfile 1단계에서
+    빌드된다. Vite 는 `import.meta.env.VITE_*` 를 빌드 시점에 문자열로 박아넣으므로,
+    Railway/Render 의 Variables 에 키를 넣어도 **빌드 인자로 따로 넘기지 않으면
+    번들에는 빈 값이 들어간다.** 배포는 성공하고 에러도 없고 데이터만 안 들어오는,
+    제일 알아채기 어려운 형태의 실패다.
+
+    런타임에 서버가 내려주면 그 함정이 통째로 사라진다. Variables 에 값을 넣고
+    재시작하면 끝이고, 전시 중에 끄고 싶으면 값을 지우면 된다 — 재빌드가 없다.
+
+    여기 담기는 건 전부 **공개해도 되는 값**이다. PostHog 프로젝트 키와 Sentry DSN
+    은 원래 브라우저에 노출되는 값이라(둘 다 쓰기 전용) 비밀이 아니다.
+    반대로 말하면, 비밀인 값을 여기에 추가하면 안 된다.
+    """
+    return {
+        "posthog_key": os.environ.get("POSTHOG_KEY", ""),
+        "posthog_host": os.environ.get("POSTHOG_HOST", "https://us.i.posthog.com"),
+        "sentry_dsn": os.environ.get("SENTRY_DSN_FRONTEND", ""),
+        "environment": os.environ.get("SENTRY_ENV", "production"),
+        "release": (os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+                    or os.environ.get("RENDER_GIT_COMMIT") or ""),
+    }
 
 
 @app.get("/api/metrics")

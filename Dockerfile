@@ -69,6 +69,14 @@ RUN mkdir -p /app/.ultralytics && \
 RUN mkdir -p webservice/consulting/uploads webservice/consulting/reports \
              webservice/consulting/samples
 
+# 영구 볼륨을 붙일 자리. **코드가 없는 경로여야 한다** — Railway/Render 볼륨은
+# 마운트 지점의 기존 내용을 덮어 가리기 때문에, /app/webservice 에 붙이면
+# 서버 코드가 통째로 사라져 기동에 실패한다(db.py 주석 참고).
+#
+# 볼륨을 여기에 붙이고 DAON_DATA_DIR=/app/data 를 설정하면 DB·업로드·리포트가
+# 재배포를 넘어 살아남는다. 설정하지 않으면 예전대로 webservice/ 안에 쓴다.
+RUN mkdir -p /app/data
+
 EXPOSE 8000
 ENV PORT=8000
 

@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ChangeEvent, type CSSProperties } from "
 import { useNavigate } from "react-router-dom";
 import { login, type User } from "../api";
 import { setFlag, TOUR_SEEN } from "../storage";
+import { track, EVENTS } from "../analytics";
 import { color, font, radius, shadow } from "../theme";
 import Logo from "../ui/Logo";
 import Card from "../ui/Card";
@@ -32,20 +33,28 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
   const [showForm, setShowForm] = useState(false);
   const nav = useNavigate();
 
-  async function go(mail: string, pw: string, to: string) {
+  async function go(mail: string, pw: string, to: string, kind: "guest" | "account") {
     setError("");
     setBusy(true);
     try {
       onLogin(await login(mail, pw));
+      track(kind === "guest" ? EVENTS.GUEST_START : EVENTS.LOGIN, { kind });
       nav(to);
     } catch (err) {
+      // 로그인 실패는 퍼널의 첫 이탈 지점이다. 여기 숫자가 크면 시드가 안 돌아
+      // 데모 계정이 없다는 뜻일 수 있다(DEPLOY.md §6) — 전시 중에는 이걸 제일
+      // 먼저 확인해야 한다.
+      track(EVENTS.LOGIN_FAILED, { kind, reason: (err as Error).message });
       setError((err as Error).message);
     } finally {
       setBusy(false);
     }
   }
 
-  const submit = (e: FormEvent) => { e.preventDefault(); go(email, password, "/mypage"); };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    go(email, password, "/mypage", "account");
+  };
 
   // 온라인 전시 관람객이 로그인 화면에서 막히면 체험 자체가 무산된다.
   // 게스트 버튼을 첫 화면의 주 동선으로 두고, 컨설팅으로 바로 보낸다.
@@ -53,7 +62,10 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }) {
   // '봤음' 플래그는 여기서 지운다. 같은 브라우저로 두 번째 관람객이 들어오면
   // 플래그가 남아 있어 안내가 건너뛰어진다 — 체험 진입은 항상 새 관람객으로
   // 취급해 첫 안내를 반드시 보여준다. (건너뛰기는 안내 안에서 여전히 가능)
-  const guest = () => { setFlag(TOUR_SEEN, ""); go(GUEST.email, GUEST.password, "/consulting"); };
+  const guest = () => {
+    setFlag(TOUR_SEEN, "");
+    go(GUEST.email, GUEST.password, "/consulting", "guest");
+  };
 
   return (
     <div style={{
