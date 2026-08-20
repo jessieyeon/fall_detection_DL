@@ -284,36 +284,56 @@ def ranged_file_response(request, path, chunk=64 * 1024):
                              headers=headers)
 
 
-# 빌드된 React SPA 를 같은 서버에서 서빙한다(단일 서버 시연). dist 가 없으면
-# (빌드 전/테스트) 이 블록은 건너뛰므로 API 전용으로 동작한다.
+# 빌드된 React SPA 를 같은 서버에서 서빙한다(단일 서버 시연).
 _DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
-if os.path.isdir(_DIST):
-    app.mount("/assets", StaticFiles(directory=os.path.join(_DIST, "assets")),
-              name="assets")
 
-    # GET 뿐 아니라 HEAD 도 받는다. 프런트가 샘플 영상 존재 여부를 HEAD 로
-    # 확인하는데, GET 만 열어두면 405 가 돌아와 '영상을 준비 중입니다'로
-    # 잘못 표시된다(파일은 멀쩡히 있는데 카드가 죽는다).
-    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
-    def spa(full_path: str, request: Request):
-        # /api·/ws 를 제외한 모든 경로는 index.html 로 돌려 클라이언트 라우팅을
-        # 유지한다(/login, /mypage, /live 새로고침에도 안 깨지게).
-        if full_path.startswith("api/"):
-            raise HTTPException(status_code=404)
+# StaticFiles 는 마운트 시점에 디렉터리가 실제로 있어야 예외를 안 낸다. 그래서
+# 이것만 조건부다. 아래 SPA 라우트는 조건 없이 등록한다 — 이유는 그 주석 참고.
+_ASSETS = os.path.join(_DIST, "assets")
+if os.path.isdir(_ASSETS):
+    app.mount("/assets", StaticFiles(directory=_ASSETS), name="assets")
 
-        # dist 에 실제로 있는 파일(폰트·샘플 영상·데모 영상 등 public/ 산출물)은
-        # 그대로 내보낸다. 이 분기가 없으면 /fonts/*.ttf 요청에 index.html 이
-        # 돌아가 폰트·영상이 배포에서 전부 깨진다. realpath 검사는 ../ 로 dist
-        # 밖을 읽어가는 경로 탈출을 막는다.
-        if full_path:
-            candidate = os.path.realpath(os.path.join(_DIST, full_path))
-            if candidate.startswith(os.path.realpath(_DIST) + os.sep) \
-                    and os.path.isfile(candidate):
-                return ranged_file_response(request, candidate)
 
-        # index.html 은 캐시 금지. 번들 파일명(assets/index-XXXX.js)은 빌드마다
-        # 바뀌는 해시라 마음껏 캐시해도 되지만, 그 파일명을 담고 있는 index.html
-        # 이 캐시되면 배포 후에도 브라우저가 옛 번들을 계속 연다 — 새 버전을
-        # 올렸는데 관람객에게 옛 화면이 보이는 사고의 원인이다.
-        return FileResponse(os.path.join(_DIST, "index.html"),
-                            headers={"Cache-Control": "no-cache"})
+# GET 뿐 아니라 HEAD 도 받는다. 프런트가 샘플 영상 존재 여부를 HEAD 로
+# 확인하는데, GET 만 열어두면 405 가 돌아와 '영상을 준비 중입니다'로
+# 잘못 표시된다(파일은 멀쩡히 있는데 카드가 죽는다).
+#
+# ⚠️ 이 라우트를 `if os.path.isdir(_DIST):` 안에 넣지 말 것. 예전에는 그랬는데,
+# dist 는 .gitignore 에 있어 **CI 체크아웃에는 존재하지 않는다.** 그래서 임포트
+# 시점 검사에 걸려 라우트가 아예 등록되지 않았고, 이 경로를 검증하는
+# tests/test_range_requests.py 7건이 통째로 404 를 받아 CI 가 계속 빨간불이었다.
+# 그리고 Railway 의 "Wait for CI" 때문에 그 커밋들의 배포가 조용히 건너뛰어졌다
+# (에러가 아니라 아무 일도 안 일어난 것처럼 보여서 며칠간 못 알아챘다).
+#
+# 이제는 항상 등록하고 dist 존재 여부는 **요청 시점에** 본다. 없으면 404 —
+# 즉 API 전용으로 동작하는 것은 그대로다.
+@app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
+def spa(full_path: str, request: Request):
+    # /api·/ws 를 제외한 모든 경로는 index.html 로 돌려 클라이언트 라우팅을
+    # 유지한다(/login, /mypage, /live 새로고침에도 안 깨지게).
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404)
+
+    # 프런트를 아직 빌드하지 않은 상태(로컬 API 개발·CI). index.html 이 없는데
+    # FileResponse 를 만들면 500 이 나므로 여기서 끊는다.
+    if not os.path.isdir(_DIST):
+        raise HTTPException(status_code=404)
+
+    # dist 에 실제로 있는 파일(폰트·샘플 영상·데모 영상 등 public/ 산출물)은
+    # 그대로 내보낸다. 이 분기가 없으면 /fonts/*.ttf 요청에 index.html 이
+    # 돌아가 폰트·영상이 배포에서 전부 깨진다. realpath 검사는 ../ 로 dist
+    # 밖을 읽어가는 경로 탈출을 막는다.
+    if full_path:
+        candidate = os.path.realpath(os.path.join(_DIST, full_path))
+        if candidate.startswith(os.path.realpath(_DIST) + os.sep) \
+                and os.path.isfile(candidate):
+            return ranged_file_response(request, candidate)
+
+    # index.html 은 캐시 금지. 번들 파일명(assets/index-XXXX.js)은 빌드마다
+    # 바뀌는 해시라 마음껏 캐시해도 되지만, 그 파일명을 담고 있는 index.html
+    # 이 캐시되면 배포 후에도 브라우저가 옛 번들을 계속 연다 — 새 버전을
+    # 올렸는데 관람객에게 옛 화면이 보이는 사고의 원인이다.
+    index = os.path.join(_DIST, "index.html")
+    if not os.path.isfile(index):
+        raise HTTPException(status_code=404)
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})
