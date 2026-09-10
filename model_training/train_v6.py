@@ -172,8 +172,18 @@ def main():
 
     le2i_tr, le2i_te, urfd_tr, urfd_te, own, mcf_te = ew.split_data(d)
 
+    # 자체 클립에 등장하는 모든 사람에 대해 leave-one-person-out.
+    # 사람마다 폴드를 돌리는 이유: 시연장의 관람객은 모델이 한 번도 못 본 사람이다.
+    # 학습에 쓴 사람에게서 오탐이 안 나는 것은 당연해서 아무것도 증명하지 못한다.
+    people = sorted(p for p in own["person"].dropna().unique())
+    print(f"자체 클립 사람: {', '.join(people)}", flush=True)
+
+    # 공개 홀드아웃(Le2i/URFD/MCF)은 폴드 하나의 모델로만 평가한다. 사람마다
+    # 다시 평가해도 같은 데이터를 여러 번 보는 것뿐이라 정보가 늘지 않는다.
+    holdout_fold = people[-1] if people else None
+
     scored, clf, feats, missing = {}, None, None, []
-    for test_p in ("p1", "p2"):
+    for test_p in people:
         own_tr = own[own.person != test_p].drop(columns=["person"])
         own_te = own[own.person == test_p].drop(columns=["person"])
         own3 = pd.concat([own_tr.assign(video_id=own_tr.video_id + f"~{k}")
@@ -189,8 +199,8 @@ def main():
         clf.fit(f[feats], f["label"])
         scored[f"own_{test_p}"] = (score(clf, feats, own_te), 30.0, 0.5)
         print(f"  {test_p} 학습 완료 ({len(feats)} feats, {time.time()-t0:.0f}s)", flush=True)
-        if test_p == "p2":
-            # 공개 홀드아웃은 v4·실험A 와 같이 p2 폴드 모델로 평가.
+        if test_p == holdout_fold:
+            # 공개 홀드아웃은 v4·실험A 와 같이 마지막 폴드 모델로 평가.
             # 데이터가 없는 홀드아웃은 건너뛴다 — 일부 데이터셋만 로컬에 있는
             # 상황(예: iCloud 로 축출됨)에서도 자체 클립 결과는 낼 수 있어야 한다.
             for name, te, fps in (("Le2i", le2i_te, 25.0),
@@ -207,11 +217,17 @@ def main():
         row = {"thr": thr, "pers": pers}
         for key, (t, fps, grace) in scored.items():
             row[key] = ew.evaluate(t, thr, pers, fps, grace)
-        a, b = row["own_p1"], row["own_p2"]
-        row["own"] = {"catch": a["catch"] + b["catch"], "nfall": a["nfall"] + b["nfall"],
-                      "fp": round((a["fp"] * a["nadl"] + b["fp"] * b["nadl"])
-                                  / max(a["nadl"] + b["nadl"], 1), 2),
-                      "lead": a["lead"] if a["lead"] is not None else b["lead"]}
+        # 사람별 폴드를 하나로 합친다.
+        #   catch  — 낙상이 있는 사람에게서만 나온다(없는 사람은 0/0 이라 무해)
+        #   fp     — 영상 수로 가중평균. 사람마다 정상 영상 개수가 달라서 단순평균은 왜곡된다
+        folds = [row[f"own_{p}"] for p in people]
+        nadl = sum(x["nadl"] for x in folds)
+        leads = [x["lead"] for x in folds if x["lead"] is not None]
+        row["own"] = {"catch": sum(x["catch"] for x in folds),
+                      "nfall": sum(x["nfall"] for x in folds),
+                      "fp": round(sum(x["fp"] * x["nadl"] for x in folds)
+                                  / max(nadl, 1), 2),
+                      "lead": leads[0] if leads else None}
         sweep.append(row)
 
     best = min(sweep, key=lambda r: (-r["own"]["catch"], r["own"]["fp"]))
