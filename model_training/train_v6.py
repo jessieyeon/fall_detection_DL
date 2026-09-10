@@ -168,6 +168,25 @@ def main():
     d = pd.read_csv(csv_path)
     d["video_id"] = d["dataset"] + "/" + d["video"]
     d = add_normalized(d)
+    # 진단용: 특정 자체 클립을 빼고 돌려본다. 예) OWN_EXCLUDE="sitfloor|liedown"
+    # 어떤 동작이 성능을 깎는지 귀속시킬 때 쓴다.
+    # 자체 클립 영상당 프레임 상한. 새로 찍은 클립이 기존보다 4~5배 길어서
+    # 프레임 수만으로 학습을 지배한다 — 정보량이 아니라 길이로 이기는 것이라
+    # 상한을 두면 영상 단위 기여도가 비슷해진다.
+    cap = int(os.environ.get("OWN_MAX_FRAMES", "0"))
+    if cap:
+        own_mask = d.dataset == "OWN"
+        head = d[own_mask].groupby("video_id", sort=False).head(cap)
+        before = int(own_mask.sum())
+        d = pd.concat([d[~own_mask], head]).sort_index()
+        print(f"OWN_MAX_FRAMES={cap}: 자체 {before} -> {len(head)} 프레임", flush=True)
+
+    excl = os.environ.get("OWN_EXCLUDE")
+    if excl:
+        before = len(d)
+        drop = (d.dataset == "OWN") & d.video.str.contains(excl, regex=True)
+        d = d[~drop]
+        print(f"OWN_EXCLUDE={excl!r}: {before-len(d)} 프레임 제외", flush=True)
     print(f"불러옴: {len(d)} 프레임, {d['video_id'].nunique()} 영상", flush=True)
 
     le2i_tr, le2i_te, urfd_tr, urfd_te, own, mcf_te = ew.split_data(d)
@@ -186,8 +205,12 @@ def main():
     for test_p in people:
         own_tr = own[own.person != test_p].drop(columns=["person"])
         own_te = own[own.person == test_p].drop(columns=["person"])
+        # 자체 클립 복제 배수. 자체 데이터가 공개 데이터셋에 비해 적을 때
+        # 비중을 올리려고 3배로 두었는데, negative 를 대량으로 추가하면 그 3배가
+        # **정상 프레임만** 증폭해서 낙상 신호를 묻어버린다. 그래서 손잡이로 뺀다.
+        own_rep = int(os.environ.get("OWN_REPEAT", "3"))
         own3 = pd.concat([own_tr.assign(video_id=own_tr.video_id + f"~{k}")
-                          for k in range(3)])
+                          for k in range(own_rep)])
         raw = build_augmented(pd.concat([le2i_tr, urfd_tr, own3], ignore_index=True))
         f = add_temporal_v6(raw)
         feats = [c for c in f.columns

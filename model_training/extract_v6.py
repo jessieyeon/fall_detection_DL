@@ -192,7 +192,13 @@ def build_tasks(data):
                 if os.path.isfile(av):
                     tasks.append(("mcf", av, f"chute{sc:02d}_cam{cam}", (sc, cam)))
 
-    for p in sorted(glob.glob(data + "/raw/*.mov") + glob.glob(data + "/raw/*.MOV")):
+    # 확장자를 대소문자 구분 없이 모아서 받는다. 아이폰은 .MOV, 안드로이드·화면녹화는
+    # .mp4 로 나오는데, 예전에는 .mov/.MOV 만 찾아서 mp4 로 찍은 클립이 **아무 경고 없이**
+    # 통째로 빠졌다(p3·p4 30개). 조용히 빠지는 것이 가장 나쁘다.
+    own_paths = set()
+    for ext in ("mov", "MOV", "mp4", "MP4", "m4v", "M4V"):
+        own_paths.update(glob.glob(os.path.join(data, "raw", f"*.{ext}")))
+    for p in sorted(own_paths):
         tasks.append(("own", p, os.path.splitext(os.path.basename(p))[0], ()))
     return tasks
 
