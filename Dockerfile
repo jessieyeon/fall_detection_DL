@@ -52,9 +52,11 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu \
 # 없는 의존성(pyserial, mediapipe)을 요구하는 코드를 이미지에 남기지 않기 위해서다.
 COPY webservice/ ./webservice/
 COPY tiles.py numpy_compat.py config.py temporal_risk.py profiles.json ./
-# 낙상 위험 모델. .dockerignore 의 *.joblib 제외에서 이 파일만 되살려 놓았다.
+# 낙상 위험 모델. .dockerignore 의 *.joblib 제외에서 이 둘만 되살려 놓았다.
 # 없으면 서버는 뜨지만 셀프캠 체험이 '모델 파일 없음'으로 조용히 꺼진다.
-COPY fall_risk_model_v5.joblib ./
+# v6 을 먼저 집는다(load_bundle 의 순서). v5 는 v6 로드가 깨졌을 때의 폴백으로 남긴다
+# — 부스(v6)와 온라인 체험이 다른 모델로 판정하면 같은 동작에 다른 답이 나온다.
+COPY fall_risk_model_v6.joblib fall_risk_model_v5.joblib ./
 # 프런트 빌드 산출물을 1단계에서 가져온다
 COPY --from=frontend /app/webservice/frontend/dist ./webservice/frontend/dist
 
