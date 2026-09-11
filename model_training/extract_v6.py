@@ -52,7 +52,41 @@ ONSETS = {"fall_p1_forward_01": 4.38, "fall_p1_forward_02": 0.51,
           "fall_p2_backward_02": 2.96, "fall_p2_side_01": 3.55,
           "fall_p2_forward_03": 1.08, "fall_p2_chair_01": 1.64,
           "fall_p2_side_02": 1.00, "fall_p2_side_03": 2.75,
-          "fall_p2_backward_03": 1.69}
+          "fall_p2_backward_03": 1.69,
+          # --- 2026-09-11 추가분 (자동 검출, 회전 보정 후) ---
+          "fall_p3_backward_01": 3.8,
+          "fall_p3_backward_02": 3.7,
+          "fall_p3_forward_01": 4.6,
+          "fall_p3_forward_02": 4.03,
+          "fall_p3_side_01": 4.07,
+          "fall_p3_side_02": 4.0,
+          "fall_p3_side_03": 3.47,
+          "fall_p3_side_04": 4.1,
+          "fall_p3_standup_01": 4.97,
+          "fall_p3_walk_01": 2.0,
+          "fall_p3_walk_02": 1.9,
+          "fall_p4_backward_01": 4.67,
+          "fall_p4_backward_02": 4.3,
+          "fall_p4_forward_01": 4.43,
+          "fall_p4_forward_02": 4.3,
+          "fall_p4_side_01": 2.07,
+          "fall_p4_side_02": 1.9,
+          "fall_p4_side_03": 4.57,
+          "fall_p4_side_04": 4.03,
+          "fall_p4_standup_01": 6.43,
+          "fall_p4_walk_01": 3.5,
+          "fall_p4_walk_02": 4.03,
+          "fall_p6_backward_01": 4.3,
+          "fall_p6_backward_02": 4.5,
+          "fall_p6_backward_03": 4.47,
+          "fall_p6_forward": 5.3,
+          "fall_p6_forward_01": 7.2,
+          "fall_p6_forward_02": 7.4,
+          "fall_p6_forward_03": 5.43,
+          "fall_p6_forward_04": 4.8,
+          "fall_p6_side_01": 4.1,
+          "fall_p6_side_02": 3.63,
+          "fall_p6_side_03": 4.3}
 
 PRE_S, BUF_S, MCF_BUF_S, FALL_DUR_S = 1.0, 1.0, 2.0, 1.5
 SMOOTH = 3
@@ -249,6 +283,9 @@ def main():
                         n += 1
             else:
                 cap = cv2.VideoCapture(path)
+                # 회전 메타데이터 적용. 자체 촬영 클립은 전부 rotation=-90 이라
+                # 이게 없으면 사람이 누운 채로 특징이 계산된다.
+                cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
                 if kind == "le2i":
                     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
                     ann = le2i_ann(meta[0], os.path.basename(path))

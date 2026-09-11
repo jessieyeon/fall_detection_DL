@@ -123,6 +123,8 @@ class PoseSource:
         self._pose = mp.solutions.pose.Pose(
             static_image_mode=False, min_detection_confidence=0.7, model_complexity=1)
         self._video = cv2.VideoCapture(video_source)
+        # 세로로 찍은 영상 파일의 회전 메타데이터를 적용(카메라 입력에는 무해).
+        self._video.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
         if not self._video.isOpened():
             # 여기서 확인하지 않으면 frames() 의 while self._video.isOpened() 가
             # 그냥 프레임을 0개 내놓고 main() 이 조용히 0으로 끝난다.
@@ -248,6 +250,8 @@ class PoseSource:
 
             if self._video is None:
                 self._video = cv2.VideoCapture(self.video_source)
+                # 세로로 찍은 영상 파일의 회전 메타데이터를 적용(카메라 입력에는 무해).
+                self._video.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
                 if not self._video.isOpened():
                     # 다른 앱이 아직 장치를 붙들고 있을 수 있다 — 잠시 뒤 재시도.
                     self._video.release()

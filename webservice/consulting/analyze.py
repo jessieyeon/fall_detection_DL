@@ -76,7 +76,11 @@ def _iter_frames(video_path, target_fps=TARGET_FPS, max_seconds=MAX_SECONDS):
     `retrieve()` 를 부르지 않아 디코딩 비용까지 아낀다.
     """
     import cv2
+    # 아이폰 등으로 찍은 영상은 세로로 촬영해도 **가로로 저장되고** 회전값이
+    # 메타데이터에만 들어간다. OpenCV 는 기본적으로 이 값을 무시해서 사람이
+    # 90도 누운 채로 처리된다 — 수직 속도가 실제로는 수평 이동을 재게 된다.
     cap = cv2.VideoCapture(video_path)
+    cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
     if not cap.isOpened():
         raise ValueError(f"영상을 열 수 없습니다: {video_path}")
     try:
