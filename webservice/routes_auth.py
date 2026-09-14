@@ -1,9 +1,9 @@
 """인증 라우트와 세션 헬퍼."""
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from webservice import auth, db
+from webservice import auth, db, tokens
 
 router = APIRouter(prefix="/api/auth")
 
@@ -19,7 +19,8 @@ def _public(row):
             "facility_name": row["facility_name"]}
 
 
-def current_user(request: Request):
+def current_user(request: Request,
+                 authorization: str = Header(default="")):
     """로그인한 사용자. **세션 값을 그대로 믿지 않고 DB 와 대조한다.**
 
     세션은 서명된 쿠키에 통째로 들어 있고 서버에 상태가 없다. 그래서 DB 가
@@ -39,6 +40,11 @@ def current_user(request: Request):
     세션을 비우고 401 을 내 로그인 화면으로 돌려보낸다.
     """
     user = request.session.get("user")
+    if user is None:
+        # 쿠키가 없으면 토큰으로 폴백. 전시 사이트가 이 앱을 iframe 으로 띄우고
+        # 관람객이 카카오톡 인앱 브라우저로 열면 Set-Cookie 가 저장되지 않아서,
+        # 로그인은 200 인데 이후 요청이 전부 401 이 된다(webservice/tokens.py 참고).
+        user = tokens.from_header(authorization)
     if user is None:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다")
 
@@ -74,7 +80,9 @@ def login(body: LoginBody, request: Request):
         raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸습니다")
     user = _public(row)
     request.session["user"] = user
-    return user
+    # 쿠키가 저장되지 않는 환경(iframe + 인앱 브라우저)을 위해 토큰도 함께 준다.
+    # 쿠키가 되는 환경에서는 클라이언트가 이걸 그냥 들고만 있으면 된다.
+    return {**user, "token": tokens.make_token(user)}
 
 
 @router.post("/logout")
@@ -84,5 +92,7 @@ def logout(request: Request):
 
 
 @router.get("/me")
-def me(request: Request):
-    return current_user(request)
+def me(user=Depends(current_user)):
+    # 직접 호출하면 authorization 기본값이 Header 객체 그대로 들어온다 —
+    # 의존성으로 받아야 FastAPI 가 실제 헤더 문자열을 넣어준다.
+    return user

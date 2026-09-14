@@ -7,7 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSock
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from webservice import cameras, db, live, live_self
+from webservice import cameras, db, live, live_self, tokens
 
 router = APIRouter()
 manager = live.ConnectionManager()
@@ -50,7 +50,12 @@ def _announce(device_key):
 @router.websocket("/ws/live")
 async def ws_live(websocket: WebSocket):
     # 세션 쿠키로 로그인한 브라우저만 스켈레톤 스트림을 볼 수 있다.
-    if websocket.session.get("user") is None:
+    # 쿠키 세션이 우선, 없으면 ?token= 으로 폴백.
+    # WebSocket 은 브라우저 API 상 커스텀 헤더를 못 붙여서 쿼리스트링을 쓴다.
+    # Safari·카카오톡 인앱 브라우저는 서드파티 iframe 에서 핸드셰이크에 쿠키를
+    # 싣지 않아, 이 폴백이 없으면 전시 환경에서 체험이 항상 403 으로 막힌다.
+    if (websocket.session.get("user") is None
+            and tokens.read_token(websocket.query_params.get("token")) is None):
         await websocket.close(code=1008)
         return
     await websocket.accept()
@@ -80,7 +85,12 @@ async def ws_live_self(websocket: WebSocket):
     수용 한도(기본 3세션)를 넘으면 busy 를 알리고 닫는다. 세션마다 프레임당
     모델 추론이 돌기 때문에 무제한으로 받으면 전체 서비스가 밀린다.
     """
-    if websocket.session.get("user") is None:
+    # 쿠키 세션이 우선, 없으면 ?token= 으로 폴백.
+    # WebSocket 은 브라우저 API 상 커스텀 헤더를 못 붙여서 쿼리스트링을 쓴다.
+    # Safari·카카오톡 인앱 브라우저는 서드파티 iframe 에서 핸드셰이크에 쿠키를
+    # 싣지 않아, 이 폴백이 없으면 전시 환경에서 체험이 항상 403 으로 막힌다.
+    if (websocket.session.get("user") is None
+            and tokens.read_token(websocket.query_params.get("token")) is None):
         await websocket.close(code=1008)
         return
     await websocket.accept()

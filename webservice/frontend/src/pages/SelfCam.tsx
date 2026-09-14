@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { color, font, radius } from "../theme";
 import { Alert, Person, Video } from "../ui/icons";
 import Card from "../ui/Card";
+import { getToken } from "../api";
 import Button from "../ui/Button";
 import { useIsMobile } from "../useMedia";
 import { CANVAS_H, CANVAS_W, drawScene } from "../ui/skeleton";
@@ -104,7 +105,10 @@ export default function SelfCam({ onExit }: { onExit: () => void }) {
 
       // 3) 판정 서버 연결
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${window.location.host}/ws/live/self`);
+      ws = new WebSocket(
+        // 쿠키가 막힌 환경(전시 iframe + 인앱 브라우저)을 위해 토큰을 쿼리로 붙인다.
+        // WebSocket 은 커스텀 헤더를 못 붙여서 헤더 대신 쿼리스트링을 쓴다.
+        `${proto}://${window.location.host}/ws/live/self` + (getToken() ? `?token=${encodeURIComponent(getToken())}` : ""));
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         // 판정 결과(self/fall)는 받되 화면에 쓰지 않는다 — 타일 하드웨어가

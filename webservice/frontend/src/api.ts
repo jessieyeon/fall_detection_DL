@@ -33,11 +33,37 @@ export interface Report {
 export interface ReportRow { id: number; user_id: number; created_at: string; location: string; summary: string }
 export interface Hospital { name: string; address: string; phone: string; distance_m: number; url: string }
 
+/** 쿠키가 저장되지 않는 환경(전시 iframe + 카카오톡 인앱 브라우저)을 위한 예비 인증.
+ *
+ *  그 환경에서는 로그인 응답의 Set-Cookie 가 저장되지 않는다. 로그인은 200 으로
+ *  성공하고 화면도 넘어가는데 이후 요청이 전부 401 이라, 겉보기에는 로그인된 채
+ *  아무것도 동작하지 않는 상태가 된다. localStorage 는 iframe 출처 기준으로
+ *  동작해서 쿠키가 막혀도 살아남는다.
+ *
+ *  쿠키가 되는 환경에서는 서버가 쿠키를 먼저 보므로 이 토큰은 쓰이지 않는다. */
+const TOKEN_KEY = "daon.token";
+
+export function setToken(t: string | null) {
+  try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); }
+  catch { /* 사파리 프라이빗 모드 등 저장이 막힌 환경 — 쿠키로만 간다 */ }
+}
+
+export function getToken(): string {
+  try { return localStorage.getItem(TOKEN_KEY) ?? ""; } catch { return ""; }
+}
+
+/** 토큰이 있으면 Authorization 헤더를 붙인다. */
+function authHeaders(): Record<string, string> {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: { "Content-Type": "application/json", ...authHeaders(),
+               ...(options.headers as Record<string, string> | undefined) },
   });
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
@@ -47,9 +73,18 @@ async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 // 인증
-export const login = (email: string, password: string) =>
-  req<User>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
-export const logout = () => req<{ status: string }>("/api/auth/logout", { method: "POST" });
+export const login = async (email: string, password: string) => {
+  const u = await req<User & { token?: string }>(
+    "/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+  // 쿠키가 저장되지 않는 환경을 대비해 토큰을 보관한다. 쿠키가 되는 환경에서는
+  // 서버가 쿠키를 먼저 보므로 그냥 들고만 있는 값이 된다.
+  setToken(u.token ?? null);
+  return u;
+};
+export const logout = async () => {
+  try { return await req<{ status: string }>("/api/auth/logout", { method: "POST" }); }
+  finally { setToken(null); }   // 서버 호출이 실패해도 토큰은 반드시 지운다
+};
 export const me = () => req<User>("/api/auth/me");
 
 // 관리자 — 설치 공간 목록은 서버가 알려준다(프런트에 하드코딩하지 않는다)
@@ -92,7 +127,8 @@ export const analyzeVideo = (file: File, location = "") => {
   const form = new FormData();
   form.append("file", file);
   form.append("location", location);
-  return fetch("/api/consulting/analyze", { method: "POST", credentials: "include", body: form })
+  return fetch("/api/consulting/analyze", { method: "POST", credentials: "include",
+                                           headers: authHeaders(), body: form })
     .then((r) => { if (!r.ok) throw new Error("업로드 실패"); return r.json() as Promise<{ job_id: string }>; });
 };
 export const consultingStatus = (jobId: string) =>

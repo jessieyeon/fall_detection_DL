@@ -6,7 +6,7 @@ import Card from "../ui/Card";
 import Button from "../ui/Button";
 import SelfCam from "./SelfCam";
 import { useIsMobile } from "../useMedia";
-import { listCameras } from "../api";
+import { listCameras, getToken } from "../api";
 import { drawScene } from "../ui/skeleton";
 import { mediaBox, mediaFill, stageGrid } from "../ui/stage";
 
@@ -65,7 +65,10 @@ function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
 
     const connect = () => {
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${window.location.host}/ws/live`);
+      ws = new WebSocket(
+        // 쿠키가 막힌 환경(전시 iframe + 인앱 브라우저)을 위해 토큰을 쿼리로 붙인다.
+        // WebSocket 은 커스텀 헤더를 못 붙여서 헤더 대신 쿼리스트링을 쓴다.
+        `${proto}://${window.location.host}/ws/live` + (getToken() ? `?token=${encodeURIComponent(getToken())}` : ""));
       ws.onclose = () => { if (mounted) retryTimer = setTimeout(connect, 1500); };
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
