@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   analyzeVideo, consultingStatus, consultingReport, consultingReports,
-  consultingImageUrl, type Report, type ReportRow,
+  fetchConsultingImage, type Report, type ReportRow,
 } from "../api";
 import { color, font, radius } from "../theme";
 import { useIsMobile } from "../useMedia";
@@ -435,8 +435,7 @@ export default function Consulting({ onOpenTour }: { onOpenTour: () => void }) {
             alignItems: "start",
           }}>
             <Card pad={0} style={{ overflow: "hidden" }}>
-              <img src={consultingImageUrl(active.id)} alt="이동 동선"
-                   style={{ display: "block", width: "100%" }} />
+              <RouteImage rid={active.id} />
               <div style={{
                 display: "flex", gap: 14, flexWrap: "wrap",
                 padding: "10px 14px", borderTop: `1px solid ${color.line}`,
@@ -625,4 +624,41 @@ function Progress({ step, failed }: { step: number; failed?: boolean }) {
       </div>
     </Card>
   );
+}
+
+/** 동선 이미지. 인증 헤더를 붙여 받아야 해서 <img src> 를 직접 쓸 수 없다.
+ *  (쿠키가 막힌 전시 환경에서 그 요청만 401 이 되어 그림이 깨졌다.) */
+function RouteImage({ rid }: { rid: number }) {
+  const [url, setUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let dead = false;
+    let made = "";
+    setUrl(""); setFailed(false);
+    fetchConsultingImage(rid)
+      .then((u) => {
+        if (dead) { URL.revokeObjectURL(u); return; }   // 언마운트 뒤 도착하면 즉시 해제
+        made = u; setUrl(u);
+      })
+      .catch(() => { if (!dead) setFailed(true); });
+    return () => { dead = true; if (made) URL.revokeObjectURL(made); };
+  }, [rid]);
+
+  if (failed) {
+    return (
+      <div style={{
+        padding: "28px 16px", textAlign: "center",
+        fontSize: font.small, color: color.inkSoft, lineHeight: 1.6,
+      }}>
+        동선 이미지를 불러오지 못했습니다.
+        <br />
+        아래 분석 결과는 정상입니다.
+      </div>
+    );
+  }
+  if (!url) {
+    return <div style={{ aspectRatio: "4 / 3", background: color.bg }} />;
+  }
+  return <img src={url} alt="이동 동선" style={{ display: "block", width: "100%" }} />;
 }

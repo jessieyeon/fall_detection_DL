@@ -136,3 +136,21 @@ export const consultingStatus = (jobId: string) =>
 export const consultingReports = () => req<ReportRow[]>("/api/consulting/reports");
 export const consultingReport = (rid: number) => req<Report>(`/api/consulting/report/${rid}`);
 export const consultingImageUrl = (rid: number) => `/api/consulting/report/${rid}/image`;
+
+/** 동선 이미지를 blob URL 로 가져온다.
+ *
+ *  `<img src>` 로 직접 불러오면 Authorization 헤더를 붙일 수 없다. 쿠키가 막힌
+ *  환경(전시 iframe + 인앱 브라우저)에서는 그 요청만 401 이 되어 이미지가
+ *  깨진 채로 뜬다 — 분석은 성공했는데 그림만 물음표가 되는 증상이었다.
+ *
+ *  토큰을 쿼리스트링에 넣는 방법도 있지만, 그러면 서버 로그·리퍼러에 토큰이
+ *  남는다. fetch 로 받아 blob 으로 바꾸는 편이 안전하다.
+ *
+ *  호출자는 다 쓴 뒤 URL.revokeObjectURL 로 해제해야 한다. */
+export async function fetchConsultingImage(rid: number): Promise<string> {
+  const res = await fetch(consultingImageUrl(rid), {
+    credentials: "include", headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`이미지를 불러오지 못했습니다 (${res.status})`);
+  return URL.createObjectURL(await res.blob());
+}
