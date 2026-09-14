@@ -28,6 +28,16 @@ const STREAM_SRC = "/api/live/stream.mjpg";
 const showDiag = import.meta.env.DEV ||
   new URLSearchParams(window.location.search).get("diag") === "1";
 
+/** 화면을 좌우로 뒤집을지. 웹캠을 관람객 **앞**에 두면 거울처럼 보여야 자연스럽다
+ *  (자기가 왼쪽으로 기울면 화면에서도 왼쪽으로 기울어야 한다).
+ *
+ *  판정에는 영향이 없다 — 모델은 서버로 오는 원본 좌표를 그대로 쓰고, 여기서는
+ *  그리기만 뒤집는다. 스켈레톤과 바닥 타일이 **함께** 뒤집히므로 둘이 어긋나지 않는다.
+ *
+ *  카메라를 관람객 뒤에 두는 배치라면 ?mirror=0 으로 끈다. */
+const mirrorView =
+  new URLSearchParams(window.location.search).get("mirror") !== "0";
+
 type LiveState = { landmarks: number[][] | null; tiles: number[]; rows: number; cols: number };
 type Stage = "idle" | "searching" | "none" | "demo" | "self";
 
@@ -83,6 +93,7 @@ function useLiveFeed(canvasRef: React.RefObject<HTMLCanvasElement>,
         const s = stateRef.current;
         drawScene(cv.getContext("2d")!, cv.width, cv.height, {
           landmarks: s.landmarks, tiles: s.tiles, rows: s.rows, cols: s.cols,
+          mirror: mirrorView,
           placeholder: "사람이 감지되면 여기에 표시됩니다",
         });
       }

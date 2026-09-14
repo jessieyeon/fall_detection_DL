@@ -8,12 +8,22 @@
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
 
 #define NUM_SERVOS 4
-const int SERVO_CH[NUM_SERVOS] = {1, 3, 5, 7};  // 타일 0~3 이 연결된 PCA9685 채널
-const int COVER_CH[NUM_SERVOS] = {2, 4, 6, 8};  // 각 타일의 덮개 서보 (타일 i 와 세트)
+// 타일 0~3 이 연결된 PCA9685 채널.
+// 소프트웨어의 격자 규약은 행 우선이고 행 0 이 "카메라에서 먼 쪽"이다.
+// 카메라를 사람 앞에 두므로  0=뒤왼 1=뒤오 / 2=앞왼 3=앞오 가 되어야 한다.
+// 실측한 배선은 ch1=뒤왼, ch3=앞왼, ch5=앞오, ch7=뒤오 라서 그에 맞춰 배열했다.
+//   0 -> ch1(뒤왼)   1 -> ch7(뒤오)
+//   2 -> ch3(앞왼)   3 -> ch5(앞오)
+const int SERVO_CH[NUM_SERVOS] = {1, 7, 3, 5};
+// 각 타일의 덮개 서보 (타일 채널 + 1). SERVO_CH 를 재배열했으므로 같은 순서를 따른다.
+const int COVER_CH[NUM_SERVOS] = {2, 8, 4, 6};
 
 // 덮개 1, 3 은 0, 2 와 반대편에 장착돼 있어 여는 회전 방향을 뒤집는다.
 // 타일 서보는 넷 다 같은 방향 그대로다. 덮개만 해당된다.
-const bool COVER_INVERT[NUM_SERVOS] = {false, true, false, true};
+// 거꾸로 달린 덮개 서보 표시. **물리적 서보의 성질**이라 SERVO_CH 재배열을
+// 그대로 따라가야 한다. 채널 기준으로는 ch2=정방향, ch4=반전, ch6=정방향, ch8=반전 이고,
+// 새 순서가 {2, 8, 4, 6} 이므로 아래와 같이 된다.
+const bool COVER_INVERT[NUM_SERVOS] = {false, true, true, false};
 
 // 일반적인 서보 기준값 (필요시 미세조정)
 #define SERVO_MIN  102    // 약 0도, 0.5ms 펄스

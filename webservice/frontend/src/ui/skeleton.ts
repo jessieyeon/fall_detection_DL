@@ -43,11 +43,14 @@ function drawBackground(ctx: CanvasRenderingContext2D, W: number, H: number) {
 }
 
 function drawFloor(ctx: CanvasRenderingContext2D, W: number, H: number,
-                   tiles: number[], rows: number, cols: number) {
+                   tiles: number[], rows: number, cols: number, mirror: boolean) {
   const floorY = H * FLOOR_TOP, floorH = H - floorY;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const fired = tiles.includes(r * cols + c);
+      // 거울 모드에서는 바닥도 같이 뒤집어야 한다. 스켈레톤만 뒤집으면
+      // 사람은 왼쪽으로 넘어지는데 타일은 오른쪽에 켜지는 모순이 생긴다.
+      const col = mirror ? cols - 1 - c : c;
+      const fired = tiles.includes(r * cols + col);
       const cw = W / cols, ch = floorH / rows;
       const x = c * cw, y = floorY + r * ch;
       ctx.fillStyle = fired ? "rgba(225,60,60,0.45)" : "rgba(255,255,255,0.03)";
@@ -110,7 +113,7 @@ function drawPose(ctx: CanvasRenderingContext2D, W: number, H: number,
 export function drawScene(ctx: CanvasRenderingContext2D, W: number, H: number,
                           s: Scene) {
   drawBackground(ctx, W, H);
-  drawFloor(ctx, W, H, s.tiles, s.rows, s.cols);
+  drawFloor(ctx, W, H, s.tiles, s.rows, s.cols, s.mirror ?? false);
   if (s.landmarks) {
     drawPose(ctx, W, H, s.landmarks, s.mirror ?? false);
   } else if (s.placeholder) {
